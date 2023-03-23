@@ -25,12 +25,12 @@ use std::collections::HashSet;
 use std::fs;
 
 fn main() {
-    // let file_path = "inputs\\ownership_smallest.c";
-    // let lines = read_file(file_path);
-    // check(lines);
-    let line = "x = foo(a, b);";
-    let out = function_arguments_in(line);
-    println!("{out:?}");
+    let file_path = "inputs\\ownership_smallest.c";
+    let lines = read_file(file_path);
+    check(lines);
+    //     let line = "x = foo(a, b);";
+    //     let out = function_arguments_in(line);
+    //     println!("{out:?}");
 }
 
 fn read_file(path: &str) -> Vec<String> {
