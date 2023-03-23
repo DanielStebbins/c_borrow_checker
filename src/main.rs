@@ -3,10 +3,8 @@ Source (C) Code Assumptions:
     - Valid C syntax (compiles).
     - No multi-line comments.
     - { and } on their own lines.
-    - No variable name shadowing (TODO).
     - Assignments have a single = as the first = on their line.
     - One statement per line (0 or 1 semicolons per line).
-    - Spaces around ' = '
 */
 
 /*
@@ -18,7 +16,8 @@ Ranting:
 /*
 TODO:
     - { } scope levels.
-    -
+    - Variable name shadowing.
+    - Better parenthesis recognition for function calls.
 */
 
 use regex::Regex;
@@ -26,9 +25,12 @@ use std::collections::HashSet;
 use std::fs;
 
 fn main() {
-    let file_path = "inputs\\ownership_smallest.c";
-    let lines = read_file(file_path);
-    check(lines);
+    // let file_path = "inputs\\ownership_smallest.c";
+    // let lines = read_file(file_path);
+    // check(lines);
+    let line = "x = foo(a, b);";
+    let out = function_arguments_in(line);
+    println!("{out:?}");
 }
 
 fn read_file(path: &str) -> Vec<String> {
@@ -80,7 +82,7 @@ fn check(lines: Vec<String>) {
             }
 
             // LHS of the Assignment.
-            let lhs = sides.0.trim().split_whitespace().collect::<Vec<_>>();
+            let lhs = sides.0.split_whitespace().collect::<Vec<_>>();
             let variable = lhs.last().unwrap();
             if lhs.len() == 1 {
                 // Previously declared variable, might be a field of a dead variable.
@@ -97,7 +99,7 @@ fn check(lines: Vec<String>) {
         }
 
         // Killing the variables that were passed to functions.
-        // killed.extend(function_arguments_in(line));
+        // killed.extend(function_arguments_in(&line));
 
         // Updating the dead set with this assignment's values.
         set.extend(killed);
@@ -155,6 +157,19 @@ fn has_dead(variables: &HashSet<String>, s: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn function_arguments_in(line: &str) -> HashSet<String> {
+    let function_char_regex = Regex::new(r"[a-zA-Z0-9_]$").unwrap();
+
+    let killed: HashSet<String> = HashSet::new();
+    let split = line.split(['(', ')'].as_ref());
+    for element in split {
+        if function_char_regex.is_match(element) {
+            // Last character is part of an identifier.
+        }
+    }
+    return killed;
 }
 
 // RUN                         cargo clippy            to view
