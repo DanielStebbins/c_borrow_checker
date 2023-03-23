@@ -169,7 +169,7 @@ fn function_arguments_in(line: &str) -> HashSet<String> {
             // Last character is part of an identifier.
         }
     }
-    return killed;
+    killed
 }
 
 // RUN                         cargo clippy            to view
