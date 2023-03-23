@@ -12,11 +12,11 @@ int main()
     oldOwner.value = 5;
     Object newOwner = oldOwner;
 
-    newOwner.value = 3;
+    // Checker should throw an error.
+    oldOwner.value = 3;
 
-    // Prints 5.
     printf("%d\n", newOwner.value);
 
-    // Checker should throw an error, using a variable that no longer owns this value.
+    oldOwner = { .value = 1 };
     printf("%d\n", oldOwner.value);
 }

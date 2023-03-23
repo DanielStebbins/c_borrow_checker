@@ -28,64 +28,7 @@ use std::fs;
 fn main() {
     let file_path = "inputs\\ownership_smallest.c";
     let lines = read_file(file_path);
-
-    let mut dead: Vec<HashSet<String>> = Vec::new();
-    for line in lines {
-        // Create the mapping of variables for this line.
-        if let Some(last) = dead.last() {
-            dead.push(last.clone());
-        } else {
-            dead.push(HashSet::new());
-        }
-        let set = dead.last_mut().unwrap();
-
-        let mut killed = "".to_string();
-        let equal_index = line.find('=');
-        if equal_index.is_some() && equal_index != line.find("==") {
-            // Line is an assignment.
-            // Split the line before the '=' into tokens, the last one before the '=' is the variable name.
-            // let split = line
-            //     .split('=')
-            //     .map(|line| line.trim())
-            //     // .filter(|token| !token.is_empty())
-            //     .collect::<Vec<_>>();
-            // println!("{split:?}");
-            let split = line.split_whitespace().collect::<Vec<_>>();
-            let list_eq_index = split.iter().position(|&r| r == "=").unwrap();
-
-            // If there is exactly one token after the equals (likely aliasing).
-            if list_eq_index + 2 == split.len() {
-                // Remove ';' from the end.
-                let mut chars = split.last().unwrap().chars();
-                chars.next_back();
-                let right_token = chars.as_str();
-
-                // If the RHS is a variable name, add it to the list of dead values.
-                let re = Regex::new(r"[a-zA-Z_][a-zA-Z0-9_]*").unwrap();
-                if re.is_match(right_token) {
-                    killed = right_token.to_string();
-                }
-            }
-
-            // Remove newly-live variables right away, before the dead variable check
-            let left_token = split[list_eq_index - 1];
-            if set.contains(left_token) {
-                set.remove(left_token);
-            }
-        } else {
-            // Line is not an assignment.
-            if let Err(err_message) = has_dead(set, line.as_str()) {
-                println!("{err_message} in line '{line}'");
-            }
-        }
-
-        // Add new dead variables after checking for dead variables, else they would always throw errors.
-        if !killed.is_empty() {
-            set.insert(killed);
-        }
-    }
-
-    println!("{dead:?}");
+    check(lines);
 }
 
 fn read_file(path: &str) -> Vec<String> {
@@ -99,6 +42,96 @@ fn read_file(path: &str) -> Vec<String> {
         .filter(|line| !line.is_empty() && (line.len() < 2 || !line.starts_with("//")))
         .map(|line| line.to_owned())
         .collect()
+}
+
+fn check(lines: Vec<String>) {
+    let mut dead: Vec<HashSet<String>> = Vec::new();
+    // Includes periods for struct fields.
+    let variable_regex = Regex::new(r"^(?:[a-zA-Z_][a-zA-Z0-9_.]*)$").unwrap();
+
+    for line in lines {
+        // Create the mapping of variables for this line.
+        if let Some(last) = dead.last() {
+            dead.push(last.clone());
+        } else {
+            dead.push(HashSet::new());
+        }
+        let set = dead.last_mut().unwrap();
+
+        let mut killed: HashSet<String> = HashSet::new();
+        let mut unkilled: HashSet<String> = HashSet::new();
+
+        let equal_index = line.find('=');
+        if equal_index.is_some() && equal_index != line.find("==") {
+            // Line is an assignment.
+            // Split the line before the '=' into tokens, the last one before the '=' is the variable name.
+            let sides = line.split_once('=').unwrap();
+
+            // RHS of the Assignment.
+            let mut chars = sides.1.trim().chars();
+            chars.next_back();
+            let rhs = chars.as_str();
+            if variable_regex.is_match(rhs) {
+                // Right Hand Side is a variable name implies this is assignment is creating an alias.
+                if let Err(err_message) = starts_with_dead(set, rhs) {
+                    println!("{err_message} on RHS of assignment in line '{line}'");
+                }
+                killed.insert(rhs.to_string());
+            }
+
+            // LHS of the Assignment.
+            let lhs = sides.0.trim().split_whitespace().collect::<Vec<_>>();
+            let variable = lhs.last().unwrap();
+            if lhs.len() == 1 {
+                // Previously declared variable, might be a field of a dead variable.
+                if let Err(err_message) = starts_with_dead_lhs(set, variable) {
+                    println!("{err_message} on LHS of assignment in line '{line}'");
+                }
+                unkilled.insert(variable.to_string());
+            }
+        } else {
+            // Line is not an assignment.
+            if let Err(err_message) = has_dead(set, line.as_str()) {
+                println!("{err_message} in line '{line}'");
+            }
+        }
+
+        // Killing the variables that were passed to functions.
+        // killed.extend(function_arguments_in(line));
+
+        // Updating the dead set with this assignment's values.
+        set.extend(killed);
+        set.retain(|variable| !unkilled.contains(variable));
+    }
+
+    println!("{dead:?}");
+}
+
+// For the LHS of an assignment, a dead variable should not be flagged. It's fields however, should be.
+fn starts_with_dead_lhs(variables: &HashSet<String>, s: &str) -> Result<(), String> {
+    for variable in variables.iter() {
+        if s.starts_with(variable) {
+            let next_index = variable.len();
+            if next_index < s.len() && s.chars().nth(next_index).unwrap() == '.' {
+                // Here, we can be sure s contains a reference to a dead variable, but is not a dead variable.
+                return Err(format!("Found dead variable '{variable}'"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn starts_with_dead(variables: &HashSet<String>, s: &str) -> Result<(), String> {
+    for variable in variables.iter() {
+        if s.starts_with(variable) {
+            let next_index = variable.len();
+            if next_index >= s.len() || s.chars().nth(next_index).unwrap() == '.' {
+                // Here, we can be sure s contains a reference to a dead variable.
+                return Err(format!("Found dead variable '{variable}'"));
+            }
+        }
+    }
+    Ok(())
 }
 
 // If needs more types of errors, make an enum for it.
