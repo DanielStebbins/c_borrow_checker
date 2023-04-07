@@ -15,8 +15,15 @@ dependencies = [
 name = "c_borrow_checker"
 version = "0.1.0"
 dependencies = [
+ "lang-c",
  "regex",
 ]
+
+[[package]]
+name = "lang-c"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "854c4f48bf55572848e20428f345a0369a1b38c8ac2fb57c1a628b4bc39574e7"
 
 [[package]]
 name = "memchr"
