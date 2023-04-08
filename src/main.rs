@@ -15,7 +15,7 @@ Ranting:
 /*
 TODO:
     - { } scope levels.
-    - Variable name shadowing.
+    - Variable name shadowing (init_declarator inside block {} should not un-kill higher-scope dead variable, killing low scopre variable should have no effect on outer scope variable).
     - Replace kill_next with not traversing those nodes.
 */
 
@@ -35,6 +35,8 @@ struct OwnershipChecker<'a> {
     live_member: bool,
     member_count: u32,
     member_identifier: Vec<String>,
+
+    debug_prints: bool,
 }
 
 // Functions that mutate and print information about the dead variables.
@@ -43,15 +45,16 @@ impl<'a> OwnershipChecker<'a> {
         let (location, _) = get_location_for_offset(self.src, span.start);
         if !self.dead.insert(identifier.clone()) {
             println!(
-                "Dead identifier '{}' used on line {}.",
+                "ERROR: Dead identifier '{}' used on line {}.",
                 identifier, location.line
             );
         } else {
-            println!(
-                "Killed identifier '{}' on line {}.",
-                identifier, location.line
-            );
-            println!("{:?}", self.dead);
+            if self.debug_prints {
+                println!(
+                    "Killed identifier '{}' on line {}.",
+                    identifier, location.line
+                );
+            }
         }
     }
 
@@ -59,21 +62,38 @@ impl<'a> OwnershipChecker<'a> {
         if self.dead.contains(&identifier) {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
-                "Dead identifier '{}' used on line {}.",
+                "ERROR: Dead identifier '{}' used on line {}.",
                 identifier, location.line
             );
         }
     }
 
     fn make_live(&mut self, identifier: String, &span: &span::Span) {
+        // Remove the identifier itself.
         self.dead.remove(&identifier);
-        // self.kill_next = false;
 
+        // Remove all identifiers that start with the given identifier in a member "." chain.
+        let period = identifier.clone() + ".";
+        let arrow = identifier.clone() + "->";
+        self.dead
+            .retain(|x| !x.starts_with(&period) && !x.starts_with(&arrow));
+
+        if self.debug_prints {
+            let (location, _) = get_location_for_offset(self.src, span.start);
+            println!(
+                "Made live identifier '{}' on line {}.",
+                identifier, location.line
+            );
+        }
+    }
+
+    fn print_dead_pre(&self, &span: &span::Span) {
         let (location, _) = get_location_for_offset(self.src, span.start);
-        println!(
-            "Live-d identifier '{}' on line {}.",
-            identifier, location.line
-        );
+        println!("{}:\t{:?}", location.line, self.dead);
+    }
+
+    fn print_dead_post(&self) {
+        println!("\t{:?}", self.dead);
     }
 }
 
@@ -89,14 +109,8 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
             visit::visit_initializer(self, &initializer.node, &initializer.span);
         }
         self.assignments += 1;
-        if let DeclaratorKind::Identifier(id) = &init_declarator.declarator.node.kind.node {
-            self.dead.remove(&id.node.name);
-            // self.kill_next = false;
-            let (location, _) = get_location_for_offset(self.src, span.start);
-            println!(
-                "Live-d identifier '{}' on line {}.",
-                id.node.name, location.line
-            );
+        if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
+            self.make_live(identifier.node.name.clone(), span)
         }
     }
 
@@ -148,13 +162,24 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         span: &'ast span::Span,
     ) {
         self.member_count += 1;
-        visit::visit_member_expression(self, member_expression, span);
+        self.visit_expression(
+            &member_expression.expression.node,
+            &member_expression.expression.span,
+        );
         self.member_count -= 1;
+
+        // This one doesn't announce if dead because thee error message will come from the kill function.
+        self.kill_next = false;
+        self.visit_identifier(
+            &member_expression.identifier.node,
+            &member_expression.identifier.span,
+        );
+        self.member_identifier
+            .push(member_expression.identifier.node.name.clone());
 
         if self.member_count == 0 && !self.member_identifier.is_empty() {
             let identifier = self.member_identifier.join(".");
             self.member_identifier.clear();
-
             if self.live_member {
                 self.make_live(identifier, span);
                 self.live_member = false;
@@ -162,6 +187,27 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
                 self.kill(identifier, span);
             }
             self.kill_next = true;
+        }
+    }
+
+    // =============================================== Control Flow ===============================================
+    // This union logic might be better any time moving into a new statement, check the tree.
+    fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, span: &'ast span::Span) {
+        self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
+
+        let temp = self.dead.clone();
+        self.visit_statement(
+            &if_statement.then_statement.node,
+            &if_statement.then_statement.span,
+        );
+        if let Some(ref else_statement) = if_statement.else_statement {
+            let if_dead = self.dead.clone();
+            self.dead = temp.clone();
+            self.visit_statement(&else_statement.node, &else_statement.span);
+            self.dead.extend(temp);
+            self.dead.extend(if_dead);
+        } else {
+            self.dead.extend(temp);
         }
     }
 
@@ -175,7 +221,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         if uoe.operator.node == UnaryOperator::Address {
             self.kill_next = false;
         }
-        visit::visit_unary_operator_expression(self, uoe, span)
+        visit::visit_unary_operator_expression(self, uoe, span);
     }
 
     // Function calls are not killed (foo(x) does not kill foo).
@@ -185,7 +231,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         span: &'ast span::Span,
     ) {
         self.kill_next = false;
-        visit::visit_call_expression(self, call_expression, span)
+        visit::visit_call_expression(self, call_expression, span);
     }
 
     fn visit_function_definition(
@@ -194,7 +240,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         span: &'ast span::Span,
     ) {
         self.kill_next = false;
-        visit::visit_function_definition(self, function_definition, span)
+        visit::visit_function_definition(self, function_definition, span);
     }
 
     // Don't kill the struct identifier in "struct_name x;"
@@ -206,7 +252,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         if let TypeSpecifier::TypedefName(_) = &type_specifier {
             self.kill_next = false;
         }
-        visit::visit_type_specifier(self, type_specifier, span)
+        visit::visit_type_specifier(self, type_specifier, span);
     }
 
     // Don't kill a struct name during its definition (typdef struct struct_name { ... )
@@ -214,25 +260,26 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         if struct_type.identifier.is_some() {
             self.kill_next = false;
         }
-        visit::visit_struct_type(self, struct_type, span)
+        visit::visit_struct_type(self, struct_type, span);
     }
 
     // Don't kill struct members being declared.
     fn visit_struct_field(&mut self, struct_field: &'ast StructField, span: &'ast span::Span) {
         self.kill_next = false;
-        visit::visit_struct_field(self, struct_field, span)
+        visit::visit_struct_field(self, struct_field, span);
     }
 
     // =============================================== Debug ===============================================
     // For printing the dead set each "line".
     fn visit_block_item(&mut self, block_item: &'ast BlockItem, span: &'ast span::Span) {
-        println!("{:?}", self.dead);
-        visit::visit_block_item(self, block_item, span)
+        self.print_dead_pre(span);
+        visit::visit_block_item(self, block_item, span);
+        self.print_dead_post();
     }
 }
 
 fn main() {
-    let file_path = "inputs\\ownership2.c";
+    let file_path = "inputs\\ownership3.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -246,15 +293,17 @@ fn main() {
         live_member: false,
         member_count: 0,
         member_identifier: Vec::new(),
+        debug_prints: false,
     };
 
-    let s = &mut String::new();
-    let mut printer = Printer::new(s);
-    printer.visit_translation_unit(&parse.unit);
-    println!("{s}");
+    if ownership_checker.debug_prints {
+        let s = &mut String::new();
+        let mut printer = Printer::new(s);
+        printer.visit_translation_unit(&parse.unit);
+        println!("{s}");
+    }
 
     ownership_checker.visit_translation_unit(&parse.unit);
-    println!("Dead variables at exit: {:?}", ownership_checker.dead);
 }
 
 // RUN                         cargo clippy            to view
