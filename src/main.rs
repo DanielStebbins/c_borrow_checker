@@ -13,10 +13,17 @@ Ranting:
 */
 
 /*
+Limitations:
+    - No library imports in the input. The checker will try to analyze the whole library. This means it's unaware of library function signatures.
+*/
+
+/*
 TODO:
     - { } scope levels.
     - Variable name shadowing (init_declarator inside block {} should not un-kill higher-scope dead variable, killing low scopre variable should have no effect on outer scope variable).
     - Replace kill_next with not traversing those nodes.
+    - Support += (AssignPlus) and other shorthand.
+    - Count . and -> separately.
 */
 
 use lang_c::ast::*;
@@ -108,7 +115,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         if let Some(ref initializer) = init_declarator.initializer {
             visit::visit_initializer(self, &initializer.node, &initializer.span);
         }
-        self.assignments += 1;
+
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
             self.make_live(identifier.node.name.clone(), span)
         }
@@ -120,12 +127,15 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         span: &'ast span::Span,
     ) {
         // Visit the RHS first to check its expressions.
-        self.visit_expression(&boe.rhs.node, &boe.rhs.span);
-        self.visit_binary_operator(&boe.operator.node, &boe.operator.span);
-
-        // Make the assigned-to LHS valid.
-        if boe.operator.node == BinaryOperator::Assign {
-            self.assignments += 1;
+        if boe.operator.node != BinaryOperator::Assign {
+            visit::visit_binary_operator_expression(self, boe, span);
+        } else {
+            match &boe.rhs.node {
+                Expression::Identifier(rhs) => {
+                    self.kill(rhs.node.name.clone(), span);
+                }
+                _ => visit::visit_expression(self, &boe.rhs.node, span),
+            }
             match &boe.lhs.node {
                 Expression::Identifier(lhs) => {
                     self.make_live(lhs.node.name.clone(), span);
@@ -136,9 +146,19 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
                 }
                 _ => (),
             }
-        } else {
-            // Don't visit the LHS of assignments, that's all handled above.
-            self.visit_expression(&boe.lhs.node, &boe.lhs.span);
+        }
+    }
+
+    // Parameters passed to a function are made live.
+    fn visit_parameter_declaration(
+        &mut self,
+        parameter_declaration: &'ast ParameterDeclaration,
+        span: &'ast span::Span,
+    ) {
+        if let Some(declarator) = &parameter_declaration.declarator {
+            if let DeclaratorKind::Identifier(identifier) = &declarator.node.kind.node {
+                self.make_live(identifier.node.name.clone(), span)
+            }
         }
     }
 
@@ -168,7 +188,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         );
         self.member_count -= 1;
 
-        // This one doesn't announce if dead because thee error message will come from the kill function.
+        // This one doesn't announce if dead because the error message will come from the kill function.
         self.kill_next = false;
         self.visit_identifier(
             &member_expression.identifier.node,
@@ -279,7 +299,7 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
 }
 
 fn main() {
-    let file_path = "inputs\\ownership3.c";
+    let file_path = "inputs\\ownership2.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -293,7 +313,7 @@ fn main() {
         live_member: false,
         member_count: 0,
         member_identifier: Vec::new(),
-        debug_prints: false,
+        debug_prints: true,
     };
 
     if ownership_checker.debug_prints {

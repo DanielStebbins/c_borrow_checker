@@ -4,7 +4,7 @@ typedef struct Owner {
     int value;
 } Owner;
 
-int main()
+void main()
 {
     Owner oldOwner;
     oldOwner.value = 5;

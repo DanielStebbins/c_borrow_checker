@@ -1,6 +1,6 @@
 // Capturing function call.
 
-int main() {
+void main() {
     int x = 0;
     int y = 1;
     foo(x, &y);         // kills x, but not &y.

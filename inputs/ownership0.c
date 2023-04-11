@@ -1,6 +1,6 @@
 // Integer variables only.
 
-int main() {
+void main() {
     int z;
     int x = 5;
     int y = x;          // kills x.
