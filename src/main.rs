@@ -26,7 +26,6 @@ Limitations:
 TODO:
     - { } scope levels.
     - Variable name shadowing (init_declarator inside block {} should not un-kill higher-scope dead variable, killing low scopre variable should have no effect on outer scope variable).
-    - Replace kill_next with not traversing those nodes.
     - Support += (AssignPlus) and other shorthand.
     - Count . and -> separately.
 */
@@ -60,11 +59,12 @@ struct BorrowChecker<'a> {
 
 // Functions that mutate and print information about the dead variables.
 impl<'a> BorrowChecker<'a> {
-    fn kill(&mut self, identifier: String, &span: &span::Span) {
+    fn kill(&mut self, identifier: String, span: &span::Span) {
         if identifier == "NULL" {
             return;
         }
         let (location, _) = get_location_for_offset(self.src, span.start);
+        self.announce_if_ref_to_moved(&identifier, span);
         if !self.dead.insert(identifier.clone()) {
             println!(
                 "ERROR: Dead identifier '{}' used on line {}.",
@@ -114,21 +114,6 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
-    // Given an expression, make it live if it is an identifier.
-    // TODO: Expand this to member identifiers.
-    fn make_live_if_identifier(&mut self, expression: &Node<Expression>, span: &span::Span) {
-        match &expression.node {
-            Expression::Identifier(identifier) => {
-                self.make_live(identifier.node.name.clone(), span);
-            }
-            Expression::Member(member_expression) => {
-                self.get_member_expression_identifier(member_expression);
-                self.make_live(self.member_identifier.clone(), span);
-            }
-            _ => visit::visit_expression(self, &expression.node, &expression.span),
-        }
-    }
-
     fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
         self.mute_member_expression = true;
         self.visit_member_expression(&member_expression.node, &member_expression.span);
@@ -168,16 +153,23 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
-    fn announce_if_mutable(&self, identifier: &String, &span: &span::Span) -> bool {
+    fn announce_if_new_ref_and_mutable(&self, identifier: &String, &span: &span::Span) {
         if self.mutable_references.contains_key(identifier) {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
                 "ERROR: Trying to create a second reference to '{}' on line {}. A mutable reference to '{}' already exists.",
                 identifier, location.line, identifier
             );
-            true
-        } else {
-            false
+        }
+    }
+
+    fn announce_if_ref_to_moved(&self, identifier: &String, &span: &span::Span) {
+        if self.mutable_references.contains_key(identifier) {
+            let (location, _) = get_location_for_offset(self.src, span.start);
+            println!(
+                "ERROR: Trying to transfer ownership of borrowed variable '{}' on line {}.",
+                identifier, location.line
+            );
         }
     }
 
@@ -232,7 +224,18 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
             visit::visit_binary_operator_expression(self, boe, span);
         } else {
             self.kill_if_identifier(&boe.rhs, span);
-            self.make_live_if_identifier(&boe.lhs, span);
+            match &boe.lhs.node {
+                Expression::Identifier(identifier) => {
+                    self.make_live(identifier.node.name.clone(), span);
+                    self.add_if_reference(identifier.node.name.clone(), &boe.rhs, span)
+                }
+                Expression::Member(member_expression) => {
+                    self.get_member_expression_identifier(member_expression);
+                    self.make_live(self.member_identifier.clone(), span);
+                    self.add_if_reference(self.member_identifier.clone(), &boe.rhs, span)
+                }
+                _ => visit::visit_expression(self, &boe.lhs.node, &boe.lhs.span),
+            }
         }
     }
 
@@ -312,7 +315,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     ) {
         if let Expression::Identifier(operand) = &uoe.operand.node {
             if uoe.operator.node == UnaryOperator::Address {
-                _ = self.announce_if_mutable(&operand.node.name, span)
+                self.announce_if_new_ref_and_mutable(&operand.node.name, span)
             }
         }
         visit::visit_unary_operator_expression(self, uoe, span);
@@ -343,19 +346,19 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     // For printing the dead set each "line".
     fn visit_block_item(&mut self, block_item: &'ast BlockItem, span: &'ast span::Span) {
         if self.set_prints {
-            // self.print_dead_pre(span);
-            self.print_mut_references_pre(span);
+            self.print_dead_pre(span);
+            // self.print_mut_references_pre(span);
         }
         visit::visit_block_item(self, block_item, span);
         if self.set_prints {
-            // self.print_dead_post();
-            self.print_mut_references_post();
+            self.print_dead_post();
+            // self.print_mut_references_post();
         }
     }
 }
 
 fn main() {
-    let file_path = "inputs\\borrow2.c";
+    let file_path = "inputs\\borrow1.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -369,7 +372,7 @@ fn main() {
         member_count: 0,
         member_identifier_pieces: Vec::new(),
         member_identifier: "".to_string(),
-        set_prints: false,
+        set_prints: true,
         ownership_debug_prints: false,
         reference_debug_prints: false,
     };
