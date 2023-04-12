@@ -1,8 +1,11 @@
 /*
 Rules:
     - Assigning to a variable makes it un-dead.
-    - Using a variable in any way not marked with 'self.kill_next = false;' makes the variable lose ownership.
+    - Using a variable alone on the RHS of an assignment or as an argument to a function call makes it dead.
     - Struct members are killed all together: 'struct.value.x'. If any piece 'struct.value' from left to right is dead, it is announced.
+    - If statements make copies of the dead variables state. At the end of the if/else, all the sets are unioned together.
+    - Any use of a variable checks whether that variable has ownership (is not dead). If it is dead, an error is printed.
+    - Any &x triggers a check to see if x already has a mutable reference. If it does, an error is printed.
 */
 
 /*
@@ -16,6 +19,7 @@ Ranting:
 Limitations:
     - No library imports in the input. The checker will try to analyze the whole library. This means it's unaware of library function signatures.
     - To get line-by-line prints, each block (if, for, while, ...) must have {}
+    - No &&x, only &x are recognized as references because they are immeditately followed by an identifier.
 */
 
 /*
@@ -34,21 +38,28 @@ use lang_c::print::*;
 use lang_c::span::*;
 use lang_c::visit::*;
 use lang_c::*;
+use std::collections::HashMap;
 use std::collections::HashSet;
 
-struct OwnershipChecker<'a> {
+struct Reference {
+    identifier: String,
+}
+
+struct BorrowChecker<'a> {
     src: &'a str,
     dead: HashSet<String>,
+    mutable_references: HashMap<String, String>,
     mute_member_expression: bool,
     member_count: u32,
     member_identifier_pieces: Vec<String>,
     member_identifier: String,
     set_prints: bool,
-    debug_prints: bool,
+    ownership_debug_prints: bool,
+    reference_debug_prints: bool,
 }
 
 // Functions that mutate and print information about the dead variables.
-impl<'a> OwnershipChecker<'a> {
+impl<'a> BorrowChecker<'a> {
     fn kill(&mut self, identifier: String, &span: &span::Span) {
         if identifier == "NULL" {
             return;
@@ -60,7 +71,7 @@ impl<'a> OwnershipChecker<'a> {
                 identifier, location.line
             );
         } else {
-            if self.debug_prints {
+            if self.ownership_debug_prints {
                 println!(
                     "Killed identifier '{}' on line {}.",
                     identifier, location.line
@@ -94,7 +105,7 @@ impl<'a> OwnershipChecker<'a> {
         self.dead
             .retain(|x| !x.starts_with(&period) && !x.starts_with(&arrow));
 
-        if self.debug_prints {
+        if self.ownership_debug_prints {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
                 "Made live identifier '{}' on line {}.",
@@ -144,7 +155,43 @@ impl<'a> OwnershipChecker<'a> {
     }
 }
 
-impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
+// Reference checking functions.
+impl<'a> BorrowChecker<'a> {
+    fn add_if_reference(&mut self, lhs: String, expression: &Node<Expression>, span: &span::Span) {
+        if let Expression::UnaryOperator(unary_expression) = &expression.node {
+            if let Expression::Identifier(operand) = &unary_expression.node.operand.node {
+                if unary_expression.node.operator.node == UnaryOperator::Address {
+                    self.mutable_references
+                        .insert(operand.node.name.clone(), lhs);
+                }
+            }
+        }
+    }
+
+    fn announce_if_mutable(&self, identifier: &String, &span: &span::Span) -> bool {
+        if self.mutable_references.contains_key(identifier) {
+            let (location, _) = get_location_for_offset(self.src, span.start);
+            println!(
+                "ERROR: Trying to create a second reference to '{}' on line {}. A mutable reference to '{}' already exists.",
+                identifier, location.line, identifier
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    fn print_mut_references_pre(&self, &span: &span::Span) {
+        let (location, _) = get_location_for_offset(self.src, span.start);
+        println!("{}:\t{:?}", location.line, self.mutable_references);
+    }
+
+    fn print_mut_references_post(&self) {
+        println!("\t{:?}", self.mutable_references);
+    }
+}
+
+impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     // =============================================== Assignments (make_live) ===============================================
     // Make identifiers valid if they are on the LHS of an assignment or are declared.
     fn visit_init_declarator(
@@ -164,7 +211,14 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
 
         // LHS
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
-            self.make_live(identifier.node.name.clone(), span)
+            self.make_live(identifier.node.name.clone(), span);
+
+            // Possibly adding a reference, which requires the LHS's identifier.
+            if let Some(ref initializer) = init_declarator.initializer {
+                if let Initializer::Expression(expression) = &initializer.node {
+                    self.add_if_reference(identifier.node.name.clone(), &expression, span);
+                }
+            }
         }
     }
 
@@ -248,9 +302,25 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         }
     }
 
+    // =============================================== References ===============================================
+
+    // References are not killed (&x does not kill x).
+    fn visit_unary_operator_expression(
+        &mut self,
+        uoe: &'ast UnaryOperatorExpression,
+        span: &'ast span::Span,
+    ) {
+        if let Expression::Identifier(operand) = &uoe.operand.node {
+            if uoe.operator.node == UnaryOperator::Address {
+                _ = self.announce_if_mutable(&operand.node.name, span)
+            }
+        }
+        visit::visit_unary_operator_expression(self, uoe, span);
+    }
+
     // =============================================== Control Flow ===============================================
     // This union logic might be better any time moving into a new statement, check the tree.
-    fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, span: &'ast span::Span) {
+    fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
         self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
 
         let temp = self.dead.clone();
@@ -273,34 +343,38 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
     // For printing the dead set each "line".
     fn visit_block_item(&mut self, block_item: &'ast BlockItem, span: &'ast span::Span) {
         if self.set_prints {
-            self.print_dead_pre(span);
+            // self.print_dead_pre(span);
+            self.print_mut_references_pre(span);
         }
         visit::visit_block_item(self, block_item, span);
         if self.set_prints {
-            self.print_dead_post();
+            // self.print_dead_post();
+            self.print_mut_references_post();
         }
     }
 }
 
 fn main() {
-    let file_path = "inputs\\kernel1.c";
+    let file_path = "inputs\\borrow2.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
-    let mut ownership_checker = OwnershipChecker {
+    let mut ownership_checker = BorrowChecker {
         src: &parse.source,
         dead: HashSet::new(),
+        mutable_references: HashMap::new(),
         mute_member_expression: false,
         member_count: 0,
         member_identifier_pieces: Vec::new(),
         member_identifier: "".to_string(),
         set_prints: false,
-        debug_prints: false,
+        ownership_debug_prints: false,
+        reference_debug_prints: false,
     };
 
-    if ownership_checker.debug_prints {
+    if ownership_checker.ownership_debug_prints || ownership_checker.reference_debug_prints {
         let s = &mut String::new();
         let mut printer = Printer::new(s);
         printer.visit_translation_unit(&parse.unit);
@@ -312,61 +386,3 @@ fn main() {
 
 // RUN                         cargo clippy            to view
 // git commit -m ""     ->     cargo clippy --fix      to fix
-
-// =============================================== No Kills ===============================================
-// References are not killed (&x does not kill x).
-// fn visit_unary_operator_expression(
-//     &mut self,
-//     uoe: &'ast UnaryOperatorExpression,
-//     span: &'ast span::Span,
-// ) {
-//     if uoe.operator.node == UnaryOperator::Address {
-//         self.kill_next = false;
-//     }
-//     visit::visit_unary_operator_expression(self, uoe, span);
-// }
-
-// // Function calls are not killed (foo(x) does not kill foo).
-// fn visit_call_expression(
-//     &mut self,
-//     call_expression: &'ast CallExpression,
-//     span: &'ast span::Span,
-// ) {
-//     self.kill_next = false;
-//     visit::visit_call_expression(self, call_expression, span);
-// }
-
-// fn visit_function_definition(
-//     &mut self,
-//     function_definition: &'ast FunctionDefinition,
-//     span: &'ast span::Span,
-// ) {
-//     self.kill_next = false;
-//     visit::visit_function_definition(self, function_definition, span);
-// }
-
-// // Don't kill the struct identifier in "struct_name x;"
-// fn visit_type_specifier(
-//     &mut self,
-//     type_specifier: &'ast TypeSpecifier,
-//     span: &'ast span::Span,
-// ) {
-//     if let TypeSpecifier::TypedefName(_) = &type_specifier {
-//         self.kill_next = false;
-//     }
-//     visit::visit_type_specifier(self, type_specifier, span);
-// }
-
-// // Don't kill a struct name during its definition (typdef struct struct_name { ... )
-// fn visit_struct_type(&mut self, struct_type: &'ast StructType, span: &'ast span::Span) {
-//     if struct_type.identifier.is_some() {
-//         self.kill_next = false;
-//     }
-//     visit::visit_struct_type(self, struct_type, span);
-// }
-
-// // Don't kill struct members being declared.
-// fn visit_struct_field(&mut self, struct_field: &'ast StructField, span: &'ast span::Span) {
-//     self.kill_next = false;
-//     visit::visit_struct_field(self, struct_field, span);
-// }
