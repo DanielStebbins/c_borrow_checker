@@ -15,6 +15,6 @@ void main()
     oldOwner.value = 3;             // oldOwner is now alive.
     int y = oldOwner.value;         // kills oldOwner.value, but not oldOwner.
     printf("%d\n", oldOwner.value); // ERROR: oldOwner.value is dead.
-    oldOwner = newOwner;            // makes live both oldOwner and oldOwner.value.
+    oldOwner = newOwner;            // makes live oldOwner and oldOwner.value, because assigning a whole new struct brings a new member value.
     return 0;
 }

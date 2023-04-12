@@ -1,8 +1,6 @@
-#include <stdio.h>
-
-void main()
-{
+void main() {
     int z;
     int y = 1;
-    x = 0;
+    foo(y);
+    x = y;
 }

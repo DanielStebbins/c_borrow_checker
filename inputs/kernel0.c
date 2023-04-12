@@ -1,4 +1,4 @@
-// The parser requires all types to be defined.
+// the parser requires all types to be defined.
 struct ctl_table {
 
 };
@@ -7,9 +7,10 @@ typedef struct loff {
 
 } loff_t;
 
-typedef int size_t;             // The parser does not recognize size_t.
+typedef int size_t;             // the parser does not recognize size_t.
 
-int perf_event_max_stack_handler(struct ctl_table *table, int write, void *buffer, size_t *lenp, loff_t *ppos) {
+// from callchain.c
+int perf_event_max_stack_handler(struct ctl_table *table, int write, void *buffer, size_t *lenp, loff_t *ppos) { 
 	int *value = table->data;
 	int new_value = *value, ret;
 	struct ctl_table new_table = *table;

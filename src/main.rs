@@ -15,6 +15,7 @@ Ranting:
 /*
 Limitations:
     - No library imports in the input. The checker will try to analyze the whole library. This means it's unaware of library function signatures.
+    - To get line-by-line prints, each block (if, for, while, ...) must have {}
 */
 
 /*
@@ -28,27 +29,30 @@ TODO:
 
 use lang_c::ast::*;
 use lang_c::driver::*;
-use lang_c::loc::get_location_for_offset;
+use lang_c::loc::*;
 use lang_c::print::*;
+use lang_c::span::*;
 use lang_c::visit::*;
 use lang_c::*;
 use std::collections::HashSet;
 
 struct OwnershipChecker<'a> {
     src: &'a str,
-    assignments: i32,
     dead: HashSet<String>,
-    kill_next: bool,
-    live_member: bool,
+    mute_member_expression: bool,
     member_count: u32,
-    member_identifier: Vec<String>,
-
+    member_identifier_pieces: Vec<String>,
+    member_identifier: String,
+    set_prints: bool,
     debug_prints: bool,
 }
 
 // Functions that mutate and print information about the dead variables.
 impl<'a> OwnershipChecker<'a> {
     fn kill(&mut self, identifier: String, &span: &span::Span) {
+        if identifier == "NULL" {
+            return;
+        }
         let (location, _) = get_location_for_offset(self.src, span.start);
         if !self.dead.insert(identifier.clone()) {
             println!(
@@ -65,13 +69,18 @@ impl<'a> OwnershipChecker<'a> {
         }
     }
 
-    fn announce_if_dead(&self, identifier: String, &span: &span::Span) {
-        if self.dead.contains(&identifier) {
-            let (location, _) = get_location_for_offset(self.src, span.start);
-            println!(
-                "ERROR: Dead identifier '{}' used on line {}.",
-                identifier, location.line
-            );
+    // Given an expression, kills it if it is an identifier.
+    // TODO: Expand this to member identifiers.
+    fn kill_if_identifier(&mut self, expression: &Node<Expression>, span: &span::Span) {
+        match &expression.node {
+            Expression::Identifier(identifier) => {
+                self.kill(identifier.node.name.clone(), span);
+            }
+            Expression::Member(member_expression) => {
+                self.get_member_expression_identifier(member_expression);
+                self.kill(self.member_identifier.clone(), span);
+            }
+            _ => visit::visit_expression(self, &expression.node, &expression.span),
         }
     }
 
@@ -89,6 +98,37 @@ impl<'a> OwnershipChecker<'a> {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
                 "Made live identifier '{}' on line {}.",
+                identifier, location.line
+            );
+        }
+    }
+
+    // Given an expression, make it live if it is an identifier.
+    // TODO: Expand this to member identifiers.
+    fn make_live_if_identifier(&mut self, expression: &Node<Expression>, span: &span::Span) {
+        match &expression.node {
+            Expression::Identifier(identifier) => {
+                self.make_live(identifier.node.name.clone(), span);
+            }
+            Expression::Member(member_expression) => {
+                self.get_member_expression_identifier(member_expression);
+                self.make_live(self.member_identifier.clone(), span);
+            }
+            _ => visit::visit_expression(self, &expression.node, &expression.span),
+        }
+    }
+
+    fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
+        self.mute_member_expression = true;
+        self.visit_member_expression(&member_expression.node, &member_expression.span);
+        self.mute_member_expression = false;
+    }
+
+    fn announce_if_dead(&self, identifier: String, &span: &span::Span) {
+        if self.dead.contains(&identifier) {
+            let (location, _) = get_location_for_offset(self.src, span.start);
+            println!(
+                "ERROR: Dead identifier '{}' used on line {}.",
                 identifier, location.line
             );
         }
@@ -112,10 +152,17 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         init_declarator: &'ast InitDeclarator,
         span: &'ast span::Span,
     ) {
+        // RHS
         if let Some(ref initializer) = init_declarator.initializer {
-            visit::visit_initializer(self, &initializer.node, &initializer.span);
+            match &initializer.node {
+                Initializer::Expression(expression) => {
+                    self.kill_if_identifier(&expression, span);
+                }
+                _ => visit::visit_initializer(self, &initializer.node, span),
+            }
         }
 
+        // LHS
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
             self.make_live(identifier.node.name.clone(), span)
         }
@@ -130,22 +177,8 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         if boe.operator.node != BinaryOperator::Assign {
             visit::visit_binary_operator_expression(self, boe, span);
         } else {
-            match &boe.rhs.node {
-                Expression::Identifier(rhs) => {
-                    self.kill(rhs.node.name.clone(), span);
-                }
-                _ => visit::visit_expression(self, &boe.rhs.node, span),
-            }
-            match &boe.lhs.node {
-                Expression::Identifier(lhs) => {
-                    self.make_live(lhs.node.name.clone(), span);
-                }
-                Expression::Member(lhs) => {
-                    self.live_member = true;
-                    self.visit_member_expression(&lhs.node, span);
-                }
-                _ => (),
-            }
+            self.kill_if_identifier(&boe.rhs, span);
+            self.make_live_if_identifier(&boe.lhs, span);
         }
     }
 
@@ -162,18 +195,31 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         }
     }
 
-    // =============================================== Small Expressions ===============================================
-    // Kill any identifier that is used in a context not on the accepted list. (references, function definitions, function calls).
-    fn visit_identifier(&mut self, identifier: &'ast Identifier, span: &'ast span::Span) {
-        // We're making a member identifier (struct_name.x.y ..., no need to kill x and y, but if struct_name.x is dead, it's an error).
-        if self.member_count > 0 {
-            self.member_identifier.push(identifier.name.clone());
-            self.announce_if_dead(self.member_identifier.join("."), span);
-        } else if self.kill_next {
-            self.kill(identifier.name.clone(), span);
+    fn visit_call_expression(
+        &mut self,
+        call_expression: &'ast CallExpression,
+        span: &'ast span::Span,
+    ) {
+        visit::visit_expression(
+            self,
+            &call_expression.callee.node,
+            &call_expression.callee.span,
+        );
+
+        for argument in &call_expression.arguments {
+            self.kill_if_identifier(argument, span);
         }
-        self.kill_next = true;
-        visit::visit_identifier(self, identifier, span)
+    }
+
+    // =============================================== Small Expressions ===============================================
+
+    fn visit_identifier(&mut self, identifier: &'ast Identifier, span: &'ast span::Span) {
+        if self.member_count > 0 {
+            self.member_identifier_pieces.push(identifier.name.clone());
+            self.announce_if_dead(self.member_identifier_pieces.join("."), span);
+        } else {
+            self.announce_if_dead(identifier.name.clone(), span);
+        }
     }
 
     fn visit_member_expression(
@@ -181,6 +227,8 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         member_expression: &'ast MemberExpression,
         span: &'ast span::Span,
     ) {
+        // Compiling a member identifier (struct_name.x.y ..., if struct_name.x is dead, it's an error).
+        // This is the recursive part.
         self.member_count += 1;
         self.visit_expression(
             &member_expression.expression.node,
@@ -188,25 +236,15 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         );
         self.member_count -= 1;
 
-        // This one doesn't announce if dead because the error message will come from the kill function.
-        self.kill_next = false;
-        self.visit_identifier(
-            &member_expression.identifier.node,
-            &member_expression.identifier.span,
-        );
-        self.member_identifier
+        self.member_identifier_pieces
             .push(member_expression.identifier.node.name.clone());
 
-        if self.member_count == 0 && !self.member_identifier.is_empty() {
-            let identifier = self.member_identifier.join(".");
-            self.member_identifier.clear();
-            if self.live_member {
-                self.make_live(identifier, span);
-                self.live_member = false;
-            } else if self.kill_next {
-                self.kill(identifier, span);
-            }
-            self.kill_next = true;
+        if self.member_count > 0 || !self.mute_member_expression {
+            self.announce_if_dead(self.member_identifier_pieces.join("."), span);
+        }
+        if self.member_count == 0 {
+            self.member_identifier = self.member_identifier_pieces.join(".");
+            self.member_identifier_pieces.clear();
         }
     }
 
@@ -231,75 +269,21 @@ impl<'ast, 'a> visit::Visit<'ast> for OwnershipChecker<'a> {
         }
     }
 
-    // =============================================== No Kills ===============================================
-    // References are not killed (&x does not kill x).
-    fn visit_unary_operator_expression(
-        &mut self,
-        uoe: &'ast UnaryOperatorExpression,
-        span: &'ast span::Span,
-    ) {
-        if uoe.operator.node == UnaryOperator::Address {
-            self.kill_next = false;
-        }
-        visit::visit_unary_operator_expression(self, uoe, span);
-    }
-
-    // Function calls are not killed (foo(x) does not kill foo).
-    fn visit_call_expression(
-        &mut self,
-        call_expression: &'ast CallExpression,
-        span: &'ast span::Span,
-    ) {
-        self.kill_next = false;
-        visit::visit_call_expression(self, call_expression, span);
-    }
-
-    fn visit_function_definition(
-        &mut self,
-        function_definition: &'ast FunctionDefinition,
-        span: &'ast span::Span,
-    ) {
-        self.kill_next = false;
-        visit::visit_function_definition(self, function_definition, span);
-    }
-
-    // Don't kill the struct identifier in "struct_name x;"
-    fn visit_type_specifier(
-        &mut self,
-        type_specifier: &'ast TypeSpecifier,
-        span: &'ast span::Span,
-    ) {
-        if let TypeSpecifier::TypedefName(_) = &type_specifier {
-            self.kill_next = false;
-        }
-        visit::visit_type_specifier(self, type_specifier, span);
-    }
-
-    // Don't kill a struct name during its definition (typdef struct struct_name { ... )
-    fn visit_struct_type(&mut self, struct_type: &'ast StructType, span: &'ast span::Span) {
-        if struct_type.identifier.is_some() {
-            self.kill_next = false;
-        }
-        visit::visit_struct_type(self, struct_type, span);
-    }
-
-    // Don't kill struct members being declared.
-    fn visit_struct_field(&mut self, struct_field: &'ast StructField, span: &'ast span::Span) {
-        self.kill_next = false;
-        visit::visit_struct_field(self, struct_field, span);
-    }
-
     // =============================================== Debug ===============================================
     // For printing the dead set each "line".
     fn visit_block_item(&mut self, block_item: &'ast BlockItem, span: &'ast span::Span) {
-        self.print_dead_pre(span);
+        if self.set_prints {
+            self.print_dead_pre(span);
+        }
         visit::visit_block_item(self, block_item, span);
-        self.print_dead_post();
+        if self.set_prints {
+            self.print_dead_post();
+        }
     }
 }
 
 fn main() {
-    let file_path = "inputs\\ownership2.c";
+    let file_path = "inputs\\kernel1.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -307,13 +291,13 @@ fn main() {
 
     let mut ownership_checker = OwnershipChecker {
         src: &parse.source,
-        assignments: 0,
         dead: HashSet::new(),
-        kill_next: true,
-        live_member: false,
+        mute_member_expression: false,
         member_count: 0,
-        member_identifier: Vec::new(),
-        debug_prints: true,
+        member_identifier_pieces: Vec::new(),
+        member_identifier: "".to_string(),
+        set_prints: false,
+        debug_prints: false,
     };
 
     if ownership_checker.debug_prints {
@@ -328,3 +312,61 @@ fn main() {
 
 // RUN                         cargo clippy            to view
 // git commit -m ""     ->     cargo clippy --fix      to fix
+
+// =============================================== No Kills ===============================================
+// References are not killed (&x does not kill x).
+// fn visit_unary_operator_expression(
+//     &mut self,
+//     uoe: &'ast UnaryOperatorExpression,
+//     span: &'ast span::Span,
+// ) {
+//     if uoe.operator.node == UnaryOperator::Address {
+//         self.kill_next = false;
+//     }
+//     visit::visit_unary_operator_expression(self, uoe, span);
+// }
+
+// // Function calls are not killed (foo(x) does not kill foo).
+// fn visit_call_expression(
+//     &mut self,
+//     call_expression: &'ast CallExpression,
+//     span: &'ast span::Span,
+// ) {
+//     self.kill_next = false;
+//     visit::visit_call_expression(self, call_expression, span);
+// }
+
+// fn visit_function_definition(
+//     &mut self,
+//     function_definition: &'ast FunctionDefinition,
+//     span: &'ast span::Span,
+// ) {
+//     self.kill_next = false;
+//     visit::visit_function_definition(self, function_definition, span);
+// }
+
+// // Don't kill the struct identifier in "struct_name x;"
+// fn visit_type_specifier(
+//     &mut self,
+//     type_specifier: &'ast TypeSpecifier,
+//     span: &'ast span::Span,
+// ) {
+//     if let TypeSpecifier::TypedefName(_) = &type_specifier {
+//         self.kill_next = false;
+//     }
+//     visit::visit_type_specifier(self, type_specifier, span);
+// }
+
+// // Don't kill a struct name during its definition (typdef struct struct_name { ... )
+// fn visit_struct_type(&mut self, struct_type: &'ast StructType, span: &'ast span::Span) {
+//     if struct_type.identifier.is_some() {
+//         self.kill_next = false;
+//     }
+//     visit::visit_struct_type(self, struct_type, span);
+// }
+
+// // Don't kill struct members being declared.
+// fn visit_struct_field(&mut self, struct_field: &'ast StructField, span: &'ast span::Span) {
+//     self.kill_next = false;
+//     visit::visit_struct_field(self, struct_field, span);
+// }
