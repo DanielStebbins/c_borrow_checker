@@ -358,7 +358,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
 }
 
 fn main() {
-    let file_path = "inputs\\borrow1.c";
+    let file_path = "inputs\\ownership1.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
