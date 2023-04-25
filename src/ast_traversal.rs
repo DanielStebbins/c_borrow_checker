@@ -1,8 +1,10 @@
+use crate::variable::VarType;
 use crate::BorrowChecker;
 use crate::PrintType;
 use lang_c::ast::*;
 use lang_c::*;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     // Triggers scope changes.
@@ -40,7 +42,27 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
 
         // LHS
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
-            self.declare_variable(identifier.node.name.clone());
+            // Matches with the first derived declarator, there are more.
+            if init_declarator.declarator.node.derived.is_empty() {
+                self.declare_variable(identifier.node.name.clone(), VarType::Owner(true))
+            } else {
+                match &init_declarator.declarator.node.derived[0].node {
+                    DerivedDeclarator::Pointer(_) => {
+                        if self.next_ref_const {
+                            self.declare_variable(
+                                identifier.node.name.clone(),
+                                VarType::ConstRef(HashSet::new()),
+                            )
+                        } else {
+                            self.declare_variable(
+                                identifier.node.name.clone(),
+                                VarType::MutRef(HashSet::new()),
+                            )
+                        }
+                    }
+                    _ => {}
+                }
+            }
 
             // Possibly adding a reference, which requires the LHS's identifier.
             // if let Some(ref initializer) = init_declarator.initializer {
@@ -72,7 +94,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     ) {
         if let Some(declarator) = &parameter_declaration.declarator {
             if let DeclaratorKind::Identifier(identifier) = &declarator.node.kind.node {
-                self.declare_variable(identifier.node.name.clone());
+                // self.declare_variable(identifier.node.name.clone());
             }
         }
     }

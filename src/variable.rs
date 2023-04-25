@@ -7,7 +7,7 @@ pub enum VarType {
     MutRef(HashSet<Id>),
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Id {
     pub name: String,
     pub scope: usize,
@@ -31,6 +31,16 @@ pub struct Variable {
 }
 
 impl Variable {
+    pub fn new(name: String, scope: usize, var_type: VarType) -> Self {
+        Variable {
+            id: Id { name, scope },
+            is_valid: true,
+            var_type: var_type,
+            const_refs: HashSet::new(),
+            mut_refs: HashSet::new(),
+        }
+    }
+
     pub fn new_owner(name: String, scope: usize) -> Self {
         Variable {
             id: Id { name, scope },

@@ -51,7 +51,7 @@ use lang_c::visit::*;
 use std::collections::HashMap;
 
 fn main() {
-    let file_path = "inputs\\ownership3.c";
+    let file_path = "inputs\\borrow0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -66,8 +66,10 @@ fn main() {
         member_identifier_pieces: Vec::new(),
         member_identifier: "".to_string(),
 
-        set_prints: PrintType::Ownership,
-        event_prints: PrintType::ErrorOnly,
+        next_ref_const: false,
+
+        set_prints: PrintType::Reference,
+        event_prints: PrintType::Reference,
     };
 
     let s = &mut String::new();

@@ -23,6 +23,9 @@ pub struct BorrowChecker<'a> {
     pub member_identifier_pieces: Vec<String>,
     pub member_identifier: String,
 
+    // For identifying const references.
+    pub next_ref_const: bool,
+
     pub set_prints: PrintType,
     pub event_prints: PrintType,
 }
@@ -85,12 +88,12 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
-    pub fn declare_variable(&mut self, name: String) {
+    pub fn declare_variable(&mut self, name: String, var_type: VarType) {
         let scope: usize = self.scopes.len() - 1;
         self.scopes
             .last_mut()
             .unwrap()
-            .insert(name.clone(), Variable::new_owner(name, scope));
+            .insert(name.clone(), Variable::new(name, scope, var_type));
     }
 
     fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
@@ -169,11 +172,62 @@ impl<'a> BorrowChecker<'a> {
         );
         println!("{}:\t{}", location.line, out);
     }
+}
 
-    // TODO
+// Reference Functions.
+impl<'a> BorrowChecker<'a> {
+    // fn add_if_reference(&mut self, lhs: String, expression: &Node<Expression>, span: &span::Span) {
+    //     if let Expression::UnaryOperator(unary_expression) = &expression.node {
+    //         if let Expression::Identifier(operand) = &unary_expression.node.operand.node {
+    //             if unary_expression.node.operator.node == UnaryOperator::Address {
+    //                 self.mutable_references
+    //                     .insert(operand.node.name.clone(), lhs);
+    //             }
+    //         }
+    //     }
+    // }
+
     pub fn print_references(&self, &span: &span::Span) {
         let (location, _) = get_location_for_offset(self.src, span.start);
-        let out = "TODO: PRINT REFERENCES";
-        println!("{}:\t{:?}", location.line, out);
+        let out = format!(
+            "[{}]",
+            self.scopes
+                .iter()
+                .skip(1)
+                .map(|s| {
+                    let inner = s
+                        .iter()
+                        .map(|(k, v)| match v.var_type {
+                            VarType::Owner(_) => {
+                                format!(
+                                    "{{{}}},{{{}}}->{}",
+                                    v.const_refs
+                                        .iter()
+                                        .map(|id| id.name.clone())
+                                        .collect::<String>(),
+                                    v.mut_refs
+                                        .iter()
+                                        .map(|id| id.name.clone())
+                                        .collect::<String>(),
+                                    k
+                                )
+                            }
+                            VarType::ConstRef(_) | VarType::MutRef(_) => {
+                                format!(
+                                    "{k}->{{{}}}",
+                                    v.const_refs
+                                        .iter()
+                                        .map(|id| id.name.clone())
+                                        .collect::<String>()
+                                )
+                            }
+                        })
+                        .intersperse(", ".to_string());
+                    format!("{{{}}}", inner.collect::<String>())
+                })
+                .intersperse("\t".to_string())
+                .collect::<String>()
+        );
+        println!("{}:\t{}", location.line, out);
     }
 }
