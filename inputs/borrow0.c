@@ -1,8 +1,11 @@
+// Several const references coexist, but all are invalidated when a mutable reference is created.
+
 void main() {
     int x = 5;
-    int *y;
-    y = &x;                 // adds a mutable reference to x.
-    foo(x);                 // ERROR: transfering ownership of borrowed variable x.
-    int z = x;              // ERROR: transfering ownership of borrowed variable x.
-    x = 8;                  // ERROR: assigning to borrowed variable x.
+    const int *c1 = &x;         // adds a const reference to x.
+    const int *c2;
+    c2 = &x;                    // adds a second const reference to x.
+    int *m = &x;                // invalidates c1 and c2.             
+    printf("%d\n", *c1);        // ERROR: Using c1, invalid reference to x.
+    printf("%d\n", *c2);        // ERROR: Using c2, invalid reference to x.
 }

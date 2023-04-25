@@ -51,7 +51,7 @@ use lang_c::visit::*;
 use std::collections::HashMap;
 
 fn main() {
-    let file_path = "inputs\\ownership1.c";
+    let file_path = "inputs\\ownership3.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 

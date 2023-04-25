@@ -1,6 +1,11 @@
+// Creating a const reference invalidates any previous mut references.
+
 void main() {
     int x = 5;
-    const int *ref0 = &x;       // creates a read-only reference of x.
-    int *ref1 = &x;             // ERROR: creates a mutable reference to x while x has a living mutable reference.
-    foo(x);                     // ERROR: transfering ownership of borrowed variable x.
+    int *m1 = &x;
+    int *m2 = &x;           // invalidates m1.
+    const int *c = &x;      // invalidates m2.
+    printf("%d\n", *m2);    // ERROR: Using m2, invalid reference to x.
+    m1 = &x;                // validates m1, invalidates c1.
+    printf("%d\n", *m1);    
 }

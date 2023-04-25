@@ -1,10 +1,10 @@
+use crate::variable::VarType;
 use crate::variable::Variable;
 use lang_c::ast::*;
 use lang_c::loc::*;
 use lang_c::span::*;
 use lang_c::visit::Visit;
 use lang_c::*;
-use std::borrow::Borrow;
 use std::collections::HashMap;
 
 pub enum PrintType {
@@ -48,10 +48,11 @@ impl<'a> BorrowChecker<'a> {
         return count;
     }
 
+    // Assumes the variable is an owner type.
     pub fn get_variable(&mut self, name: &str) -> &mut Variable {
         let count = self.get_scope_number(name);
         if !self.scopes[count].contains_key(name) {
-            self.scopes[count].insert(name.to_string(), Variable::new(name.to_string(), 0));
+            self.scopes[count].insert(name.to_string(), Variable::new_owner(name.to_string(), 0));
         }
         return self.scopes[count].get_mut(name).unwrap();
     }
@@ -63,14 +64,14 @@ impl<'a> BorrowChecker<'a> {
         let (location, _) = get_location_for_offset(self.src, span.start);
         let variable: &mut Variable = self.get_variable(&name);
         let was_valid: bool = variable.is_valid;
-        let was_copy_type: bool = variable.is_copy_type;
+        let var_type: VarType = variable.var_type.clone();
         variable.is_valid = is_valid;
 
         // Error / Debug prints.
         // self.announce_if_ref_to_moved(&name, span);
         if is_valid && matches!(self.event_prints, PrintType::Ownership) {
             println!("Made live '{}' on line {}.", name, location.line);
-        } else if !is_valid && !was_copy_type {
+        } else if !is_valid && matches!(var_type, VarType::Owner(_)) {
             if !was_valid {
                 println!(
                     "ERROR: Use of moved value '{}' used on line {}.",
@@ -89,7 +90,7 @@ impl<'a> BorrowChecker<'a> {
         self.scopes
             .last_mut()
             .unwrap()
-            .insert(name.clone(), Variable::new(name, scope));
+            .insert(name.clone(), Variable::new_owner(name, scope));
     }
 
     fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
@@ -154,7 +155,7 @@ impl<'a> BorrowChecker<'a> {
                     let inner = s
                         .iter()
                         .map(|(k, v)| {
-                            if !v.is_copy_type {
+                            if matches!(v.var_type, VarType::Owner(_)) {
                                 format!("{k}:{}", v.is_valid as i32)
                             } else {
                                 k.to_string()
