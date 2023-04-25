@@ -4,4 +4,5 @@ void main() {
     y = &x;                 // adds a mutable reference to x.
     foo(x);                 // ERROR: transfering ownership of borrowed variable x.
     int z = x;              // ERROR: transfering ownership of borrowed variable x.
+    x = 8;                  // ERROR: assigning to borrowed variable x.
 }

@@ -40,150 +40,183 @@ use lang_c::*;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-struct Reference {
-    identifier: String,
+enum PrintType {
+    Ownership,
+    Reference,
+    ErrorOnly,
+}
+
+struct Id {
+    name: String,
+    scope: usize,
+}
+
+struct Variable {
+    id: Id,
+    is_valid: bool,
+    is_copy_type: bool,
+    const_refs: HashSet<Id>,
+    mut_ref: Option<Id>,
+    points_to: Option<Id>,
+}
+
+impl Variable {
+    fn new(name: String, scope: usize) -> Self {
+        Variable {
+            id: Id { name, scope },
+            is_valid: true,
+            is_copy_type: false,
+            const_refs: HashSet::new(),
+            mut_ref: None,
+            points_to: None,
+        }
+    }
 }
 
 struct BorrowChecker<'a> {
     src: &'a str,
-    dead: HashSet<String>,
-    mutable_references: HashMap<String, String>,
+    scopes: Vec<HashMap<String, Variable>>,
+
     mute_member_expression: bool,
     member_count: u32,
     member_identifier_pieces: Vec<String>,
     member_identifier: String,
-    set_prints: bool,
-    ownership_debug_prints: bool,
-    reference_debug_prints: bool,
+
+    set_prints: PrintType,
+    event_prints: PrintType,
 }
 
 // Functions that mutate and print information about the dead variables.
 impl<'a> BorrowChecker<'a> {
-    fn kill(&mut self, identifier: String, span: &span::Span) {
-        if identifier == "NULL" {
+    // Finds the most local (highest count) scope where the given name exists.
+    fn get_scope_number(&self, name: String) -> usize {
+        let mut count: usize = self.scopes.len() - 1;
+        for scope in self.scopes.iter().rev() {
+            if scope.contains_key(&name) {
+                return count;
+            }
+            count -= 1;
+        }
+        return count;
+    }
+
+    fn get_variable(&mut self, name: &str) -> &mut Variable {
+        let mut count = 0;
+        for scope in 0..self.scopes.len() {
+            if self.scopes[scope].contains_key(name) {
+                count = scope;
+            }
+        }
+        if !self.scopes[count].contains_key(name) {
+            self.scopes[count].insert(name.to_string(), Variable::new(name.to_string(), 0));
+        }
+        return self.scopes[count].get_mut(name).unwrap();
+    }
+
+    fn set_is_valid(&mut self, name: String, is_valid: bool, span: &span::Span) {
+        if name == "NULL" {
             return;
         }
         let (location, _) = get_location_for_offset(self.src, span.start);
-        self.announce_if_ref_to_moved(&identifier, span);
-        if !self.dead.insert(identifier.clone()) {
-            println!(
-                "ERROR: Dead identifier '{}' used on line {}.",
-                identifier, location.line
-            );
-        } else {
-            if self.ownership_debug_prints {
+        let variable: &mut Variable = self.get_variable(&name);
+        let was_valid: bool = variable.is_valid;
+        let was_copy_type: bool = variable.is_copy_type;
+        variable.is_valid = is_valid;
+
+        // Error / Debug prints.
+        // self.announce_if_ref_to_moved(&name, span);
+        if is_valid && matches!(self.event_prints, PrintType::Ownership) {
+            println!("Made live '{}' on line {}.", name, location.line);
+        } else if !is_valid && !was_copy_type {
+            if !was_valid {
                 println!(
-                    "Killed identifier '{}' on line {}.",
-                    identifier, location.line
+                    "ERROR: Use of moved value '{}' used on line {}.",
+                    name, location.line
                 );
-            }
-        }
-    }
-
-    // Given an expression, kills it if it is an identifier.
-    // TODO: Expand this to member identifiers.
-    fn kill_if_identifier(&mut self, expression: &Node<Expression>, span: &span::Span) {
-        match &expression.node {
-            Expression::Identifier(identifier) => {
-                self.kill(identifier.node.name.clone(), span);
-            }
-            Expression::Member(member_expression) => {
-                self.get_member_expression_identifier(member_expression);
-                self.kill(self.member_identifier.clone(), span);
-            }
-            _ => visit::visit_expression(self, &expression.node, &expression.span),
-        }
-    }
-
-    fn make_live(&mut self, identifier: String, &span: &span::Span) {
-        // Remove the identifier itself.
-        self.dead.remove(&identifier);
-
-        // Remove all identifiers that start with the given identifier in a member "." chain.
-        let period = identifier.clone() + ".";
-        let arrow = identifier.clone() + "->";
-        self.dead
-            .retain(|x| !x.starts_with(&period) && !x.starts_with(&arrow));
-
-        if self.ownership_debug_prints {
-            let (location, _) = get_location_for_offset(self.src, span.start);
-            println!(
-                "Made live identifier '{}' on line {}.",
-                identifier, location.line
-            );
-        }
-    }
-
-    fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
-        self.mute_member_expression = true;
-        self.visit_member_expression(&member_expression.node, &member_expression.span);
-        self.mute_member_expression = false;
-    }
-
-    fn announce_if_dead(&self, identifier: String, &span: &span::Span) {
-        if self.dead.contains(&identifier) {
-            let (location, _) = get_location_for_offset(self.src, span.start);
-            println!(
-                "ERROR: Dead identifier '{}' used on line {}.",
-                identifier, location.line
-            );
-        }
-    }
-
-    fn print_dead_pre(&self, &span: &span::Span) {
-        let (location, _) = get_location_for_offset(self.src, span.start);
-        println!("{}:\t{:?}", location.line, self.dead);
-    }
-
-    fn print_dead_post(&self) {
-        println!("\t{:?}", self.dead);
-    }
-}
-
-// Reference checking functions.
-impl<'a> BorrowChecker<'a> {
-    fn add_if_reference(&mut self, lhs: String, expression: &Node<Expression>, span: &span::Span) {
-        if let Expression::UnaryOperator(unary_expression) = &expression.node {
-            if let Expression::Identifier(operand) = &unary_expression.node.operand.node {
-                if unary_expression.node.operator.node == UnaryOperator::Address {
-                    self.mutable_references
-                        .insert(operand.node.name.clone(), lhs);
+            } else {
+                if matches!(self.event_prints, PrintType::Ownership) {
+                    println!("Killed '{}' on line {}.", name, location.line);
                 }
             }
         }
     }
 
-    fn announce_if_new_ref_and_mutable(&self, identifier: &String, &span: &span::Span) {
-        if self.mutable_references.contains_key(identifier) {
-            let (location, _) = get_location_for_offset(self.src, span.start);
-            println!(
-                "ERROR: Trying to create a second reference to '{}' on line {}. A mutable reference to '{}' already exists.",
-                identifier, location.line, identifier
-            );
+    fn declare_variable(&mut self, name: String) {
+        let scope: usize = self.scopes.len() - 1;
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .insert(name.clone(), Variable::new(name, scope));
+    }
+
+    // Given an expression, sets it to invalid it if it is an uncopiable variable.
+    // TODO: Make work with struct types again.
+    fn unowner(&mut self, expression: &Node<Expression>, span: &span::Span) {
+        match &expression.node {
+            Expression::Identifier(name) => {
+                self.set_is_valid(name.node.name.clone(), false, span);
+            }
+            // Expression::Member(member_expression) => {
+            //     self.get_member_expression_identifier(member_expression);
+            //     self.kill(self.member_identifier.clone(), span);
+            // }
+            _ => visit::visit_expression(self, &expression.node, &expression.span),
         }
     }
 
-    fn announce_if_ref_to_moved(&self, identifier: &String, &span: &span::Span) {
-        if self.mutable_references.contains_key(identifier) {
-            let (location, _) = get_location_for_offset(self.src, span.start);
-            println!(
-                "ERROR: Trying to transfer ownership of borrowed variable '{}' on line {}.",
-                identifier, location.line
-            );
-        }
-    }
-
-    fn print_mut_references_pre(&self, &span: &span::Span) {
+    fn print_ownership(&self, &span: &span::Span) {
         let (location, _) = get_location_for_offset(self.src, span.start);
-        println!("{}:\t{:?}", location.line, self.mutable_references);
+        let mut outer = Vec::new();
+        for scope in &self.scopes {
+            let mut inner = Vec::new();
+            for key in scope.keys() {
+                let mut current = key.to_string();
+                if !scope.get(key).unwrap().is_copy_type {
+                    current.push(':');
+                    if scope.get(key).unwrap().is_valid {
+                        current.push('1')
+                    } else {
+                        current.push('0')
+                    }
+                }
+                inner.push(current);
+            }
+            let mut temp = "{".to_string();
+            temp.push_str(&inner.join(", "));
+            temp.push('}');
+            outer.push(temp);
+        }
+        let mut out = "[".to_string();
+        out.push_str(&outer.join("\t"));
+        out.push(']');
+        println!("{}:\t{}", location.line, out);
     }
 
-    fn print_mut_references_post(&self) {
-        println!("\t{:?}", self.mutable_references);
+    // TODO
+    fn print_references(&self, &span: &span::Span) {
+        let (location, _) = get_location_for_offset(self.src, span.start);
+        let out = "TODO: PRINT REFERENCES";
+        println!("{}:\t{:?}", location.line, out);
     }
 }
 
 impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
+    // Triggers scope changes.
+    fn visit_statement(&mut self, statement: &'ast Statement, span: &'ast span::Span) {
+        // Add a new scope layer for this block.
+        if let Statement::Compound(_) = statement {
+            self.scopes.push(HashMap::new());
+        }
+
+        // Run the block.
+        visit::visit_statement(self, statement, span);
+
+        // Remove the block's scope layer.
+        if let Statement::Compound(_) = statement {
+            self.scopes.pop();
+        }
+    }
+
     // =============================================== Assignments (make_live) ===============================================
     // Make identifiers valid if they are on the LHS of an assignment or are declared.
     fn visit_init_declarator(
@@ -195,7 +228,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         if let Some(ref initializer) = init_declarator.initializer {
             match &initializer.node {
                 Initializer::Expression(expression) => {
-                    self.kill_if_identifier(&expression, span);
+                    self.unowner(&expression, span);
                 }
                 _ => visit::visit_initializer(self, &initializer.node, span),
             }
@@ -203,14 +236,14 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
 
         // LHS
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
-            self.make_live(identifier.node.name.clone(), span);
+            self.declare_variable(identifier.node.name.clone());
 
             // Possibly adding a reference, which requires the LHS's identifier.
-            if let Some(ref initializer) = init_declarator.initializer {
-                if let Initializer::Expression(expression) = &initializer.node {
-                    self.add_if_reference(identifier.node.name.clone(), &expression, span);
-                }
-            }
+            // if let Some(ref initializer) = init_declarator.initializer {
+            //     if let Initializer::Expression(expression) = &initializer.node {
+            //         self.add_if_reference(identifier.node.name.clone(), &expression, span);
+            //     }
+            // }
         }
     }
 
@@ -219,146 +252,147 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         boe: &'ast ast::BinaryOperatorExpression,
         span: &'ast span::Span,
     ) {
-        // Visit the RHS first to check its expressions.
         if boe.operator.node != BinaryOperator::Assign {
             visit::visit_binary_operator_expression(self, boe, span);
         } else {
-            self.kill_if_identifier(&boe.rhs, span);
+            self.unowner(&boe.rhs, span);
             match &boe.lhs.node {
                 Expression::Identifier(identifier) => {
-                    self.make_live(identifier.node.name.clone(), span);
-                    self.add_if_reference(identifier.node.name.clone(), &boe.rhs, span)
+                    self.set_is_valid(identifier.node.name.clone(), true, span);
+                    // self.add_if_reference(identifier.node.name.clone(), &boe.rhs, span)
                 }
-                Expression::Member(member_expression) => {
-                    self.get_member_expression_identifier(member_expression);
-                    self.make_live(self.member_identifier.clone(), span);
-                    self.add_if_reference(self.member_identifier.clone(), &boe.rhs, span)
-                }
+                // Expression::Member(member_expression) => {
+                //     self.get_member_expression_identifier(member_expression);
+                //     self.make_live(self.member_identifier.clone(), span);
+                //     self.add_if_reference(self.member_identifier.clone(), &boe.rhs, span)
+                // }
                 _ => visit::visit_expression(self, &boe.lhs.node, &boe.lhs.span),
             }
         }
     }
 
-    // Parameters passed to a function are made live.
-    fn visit_parameter_declaration(
-        &mut self,
-        parameter_declaration: &'ast ParameterDeclaration,
-        span: &'ast span::Span,
-    ) {
-        if let Some(declarator) = &parameter_declaration.declarator {
-            if let DeclaratorKind::Identifier(identifier) = &declarator.node.kind.node {
-                self.make_live(identifier.node.name.clone(), span)
-            }
-        }
-    }
+    // // Parameters passed to a function are made live.
+    // fn visit_parameter_declaration(
+    //     &mut self,
+    //     parameter_declaration: &'ast ParameterDeclaration,
+    //     span: &'ast span::Span,
+    // ) {
+    //     if let Some(declarator) = &parameter_declaration.declarator {
+    //         if let DeclaratorKind::Identifier(identifier) = &declarator.node.kind.node {
+    //             self.make_live(identifier.node.name.clone(), span)
+    //         }
+    //     }
+    // }
 
-    fn visit_call_expression(
-        &mut self,
-        call_expression: &'ast CallExpression,
-        span: &'ast span::Span,
-    ) {
-        visit::visit_expression(
-            self,
-            &call_expression.callee.node,
-            &call_expression.callee.span,
-        );
+    // fn visit_call_expression(
+    //     &mut self,
+    //     call_expression: &'ast CallExpression,
+    //     span: &'ast span::Span,
+    // ) {
+    //     visit::visit_expression(
+    //         self,
+    //         &call_expression.callee.node,
+    //         &call_expression.callee.span,
+    //     );
 
-        for argument in &call_expression.arguments {
-            self.kill_if_identifier(argument, span);
-        }
-    }
+    //     for argument in &call_expression.arguments {
+    //         self.kill_if_identifier(argument, span);
+    //     }
+    // }
 
-    // =============================================== Small Expressions ===============================================
+    // // =============================================== Small Expressions ===============================================
 
-    fn visit_identifier(&mut self, identifier: &'ast Identifier, span: &'ast span::Span) {
-        if self.member_count > 0 {
-            self.member_identifier_pieces.push(identifier.name.clone());
-            self.announce_if_dead(self.member_identifier_pieces.join("."), span);
-        } else {
-            self.announce_if_dead(identifier.name.clone(), span);
-        }
-    }
+    // fn visit_identifier(&mut self, identifier: &'ast Identifier, span: &'ast span::Span) {
+    //     if self.member_count > 0 {
+    //         self.member_identifier_pieces.push(identifier.name.clone());
+    //         self.announce_if_dead(self.member_identifier_pieces.join("."), span);
+    //     } else {
+    //         self.announce_if_dead(identifier.name.clone(), span);
+    //     }
+    // }
 
-    fn visit_member_expression(
-        &mut self,
-        member_expression: &'ast MemberExpression,
-        span: &'ast span::Span,
-    ) {
-        // Compiling a member identifier (struct_name.x.y ..., if struct_name.x is dead, it's an error).
-        // This is the recursive part.
-        self.member_count += 1;
-        self.visit_expression(
-            &member_expression.expression.node,
-            &member_expression.expression.span,
-        );
-        self.member_count -= 1;
+    // fn visit_member_expression(
+    //     &mut self,
+    //     member_expression: &'ast MemberExpression,
+    //     span: &'ast span::Span,
+    // ) {
+    //     // Compiling a member identifier (struct_name.x.y ..., if struct_name.x is dead, it's an error).
+    //     // This is the recursive part.
+    //     self.member_count += 1;
+    //     self.visit_expression(
+    //         &member_expression.expression.node,
+    //         &member_expression.expression.span,
+    //     );
+    //     self.member_count -= 1;
 
-        self.member_identifier_pieces
-            .push(member_expression.identifier.node.name.clone());
+    //     self.member_identifier_pieces
+    //         .push(member_expression.identifier.node.name.clone());
 
-        if self.member_count > 0 || !self.mute_member_expression {
-            self.announce_if_dead(self.member_identifier_pieces.join("."), span);
-        }
-        if self.member_count == 0 {
-            self.member_identifier = self.member_identifier_pieces.join(".");
-            self.member_identifier_pieces.clear();
-        }
-    }
+    //     if self.member_count > 0 || !self.mute_member_expression {
+    //         self.announce_if_dead(self.member_identifier_pieces.join("."), span);
+    //     }
+    //     if self.member_count == 0 {
+    //         self.member_identifier = self.member_identifier_pieces.join(".");
+    //         self.member_identifier_pieces.clear();
+    //     }
+    // }
 
-    // =============================================== References ===============================================
+    // // =============================================== References ===============================================
 
-    // References are not killed (&x does not kill x).
-    fn visit_unary_operator_expression(
-        &mut self,
-        uoe: &'ast UnaryOperatorExpression,
-        span: &'ast span::Span,
-    ) {
-        if let Expression::Identifier(operand) = &uoe.operand.node {
-            if uoe.operator.node == UnaryOperator::Address {
-                self.announce_if_new_ref_and_mutable(&operand.node.name, span)
-            }
-        }
-        visit::visit_unary_operator_expression(self, uoe, span);
-    }
+    // // References are not killed (&x does not kill x).
+    // fn visit_unary_operator_expression(
+    //     &mut self,
+    //     uoe: &'ast UnaryOperatorExpression,
+    //     span: &'ast span::Span,
+    // ) {
+    //     if let Expression::Identifier(operand) = &uoe.operand.node {
+    //         if uoe.operator.node == UnaryOperator::Address {
+    //             self.announce_if_new_ref_and_mutable(&operand.node.name, span)
+    //         }
+    //     }
+    //     visit::visit_unary_operator_expression(self, uoe, span);
+    // }
 
-    // =============================================== Control Flow ===============================================
-    // This union logic might be better any time moving into a new statement, check the tree.
-    fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
-        self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
+    // // =============================================== Control Flow ===============================================
+    // // This union logic might be better any time moving into a new statement, check the tree.
+    // fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
+    //     self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
 
-        let temp = self.dead.clone();
-        self.visit_statement(
-            &if_statement.then_statement.node,
-            &if_statement.then_statement.span,
-        );
-        if let Some(ref else_statement) = if_statement.else_statement {
-            let if_dead = self.dead.clone();
-            self.dead = temp.clone();
-            self.visit_statement(&else_statement.node, &else_statement.span);
-            self.dead.extend(temp);
-            self.dead.extend(if_dead);
-        } else {
-            self.dead.extend(temp);
-        }
-    }
+    //     let temp = self.dead.clone();
+    //     self.visit_statement(
+    //         &if_statement.then_statement.node,
+    //         &if_statement.then_statement.span,
+    //     );
+    //     if let Some(ref else_statement) = if_statement.else_statement {
+    //         let if_dead = self.dead.clone();
+    //         self.dead = temp.clone();
+    //         self.visit_statement(&else_statement.node, &else_statement.span);
+    //         self.dead.extend(temp);
+    //         self.dead.extend(if_dead);
+    //     } else {
+    //         self.dead.extend(temp);
+    //     }
+    // }
 
     // =============================================== Debug ===============================================
     // For printing the dead set each "line".
     fn visit_block_item(&mut self, block_item: &'ast BlockItem, span: &'ast span::Span) {
-        if self.set_prints {
-            self.print_dead_pre(span);
-            // self.print_mut_references_pre(span);
+        match self.set_prints {
+            PrintType::Ownership => self.print_ownership(span),
+            PrintType::Reference => self.print_references(span),
+            PrintType::ErrorOnly => {}
         }
         visit::visit_block_item(self, block_item, span);
-        if self.set_prints {
-            self.print_dead_post();
-            // self.print_mut_references_post();
+        match self.set_prints {
+            PrintType::Ownership => self.print_ownership(span),
+            PrintType::Reference => self.print_references(span),
+            PrintType::ErrorOnly => {}
         }
     }
 }
 
 fn main() {
-    let file_path = "inputs\\ownership1.c";
+    let file_path = "inputs\\ownership0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -366,23 +400,21 @@ fn main() {
 
     let mut ownership_checker = BorrowChecker {
         src: &parse.source,
-        dead: HashSet::new(),
-        mutable_references: HashMap::new(),
+        scopes: vec![HashMap::new()],
+
         mute_member_expression: false,
         member_count: 0,
         member_identifier_pieces: Vec::new(),
         member_identifier: "".to_string(),
-        set_prints: true,
-        ownership_debug_prints: false,
-        reference_debug_prints: false,
+
+        set_prints: PrintType::Ownership,
+        event_prints: PrintType::ErrorOnly,
     };
 
-    if ownership_checker.ownership_debug_prints || ownership_checker.reference_debug_prints {
-        let s = &mut String::new();
-        let mut printer = Printer::new(s);
-        printer.visit_translation_unit(&parse.unit);
-        println!("{s}");
-    }
+    let s = &mut String::new();
+    let mut printer = Printer::new(s);
+    printer.visit_translation_unit(&parse.unit);
+    println!("{s}");
 
     ownership_checker.visit_translation_unit(&parse.unit);
 }
