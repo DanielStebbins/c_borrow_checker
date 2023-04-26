@@ -1,5 +1,5 @@
 // Transfer ownership while borrowed.
-#include <stdio.h>
+
 void main() {
     int x = 5;
     int *m = &x;

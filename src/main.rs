@@ -27,10 +27,9 @@ TODO:
     - Support += (AssignPlus) and other shorthand.
     - Count . and -> separately.
     - Clean the messy global scope.
-    - Fix re-living leftmost struct name, should re-live all known right-er struct names.
-    - Reference counting.
     - Reference errors.
     - Lifetime errors.
+    - Cannot move out of index of array.
 */
 
 #![feature(iter_intersperse)]
@@ -51,7 +50,7 @@ use lang_c::visit::*;
 use std::collections::HashMap;
 
 fn main() {
-    let file_path = "inputs\\borrow0.c";
+    let file_path = "inputs\\kernel0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -68,14 +67,14 @@ fn main() {
 
         next_ref_const: false,
 
-        set_prints: PrintType::Reference,
-        event_prints: PrintType::Reference,
+        set_prints: PrintType::Ownership,
+        event_prints: PrintType::ErrorOnly,
     };
 
-    let s = &mut String::new();
-    let mut printer = Printer::new(s);
-    printer.visit_translation_unit(&parse.unit);
-    println!("{s}");
+    // let s = &mut String::new();
+    // let mut printer = Printer::new(s);
+    // printer.visit_translation_unit(&parse.unit);
+    // println!("{s}");
 
     ownership_checker.visit_translation_unit(&parse.unit);
 }

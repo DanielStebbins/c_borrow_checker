@@ -1,4 +1,4 @@
-use crate::variable::VarType;
+use crate::variable::*;
 use crate::BorrowChecker;
 use crate::PrintType;
 use lang_c::ast::*;
@@ -19,6 +19,34 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
 
         // Remove the block's scope layer.
         if let Statement::Compound(_) = statement {
+            let scope = self.scopes.len() - 1;
+            let lost: Vec<String> = self
+                .scopes
+                .last()
+                .unwrap()
+                .keys()
+                .map(|k| k.to_string())
+                .collect();
+
+            for name in lost {
+                let id = Id {
+                    name: name,
+                    scope: scope,
+                };
+                let const_ids = self.id_to_var(&id).const_refs.clone();
+                for ref_id in const_ids.iter() {
+                    if let VarType::ConstRef(points_to) = &mut self.id_to_mut_var(ref_id).var_type {
+                        points_to.remove(&id);
+                    }
+                }
+                let mut_ids = self.id_to_var(&id).mut_refs.clone();
+                for ref_id in mut_ids.iter() {
+                    if let VarType::MutRef(points_to) = &mut self.id_to_mut_var(ref_id).var_type {
+                        points_to.remove(&id);
+                    }
+                }
+            }
+
             self.scopes.pop();
         }
     }
@@ -52,24 +80,24 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                             self.declare_variable(
                                 identifier.node.name.clone(),
                                 VarType::ConstRef(HashSet::new()),
-                            )
+                            );
                         } else {
                             self.declare_variable(
                                 identifier.node.name.clone(),
                                 VarType::MutRef(HashSet::new()),
                             )
                         }
+
+                        // Possibly adding a reference to the RHS, which requires the LHS's identifier.
+                        if let Some(ref initializer) = init_declarator.initializer {
+                            if let Initializer::Expression(expression) = &initializer.node {
+                                self.add_reference(identifier.node.name.clone(), &expression, span);
+                            }
+                        }
                     }
                     _ => {}
                 }
             }
-
-            // Possibly adding a reference, which requires the LHS's identifier.
-            // if let Some(ref initializer) = init_declarator.initializer {
-            //     if let Initializer::Expression(expression) = &initializer.node {
-            //         self.add_if_reference(identifier.node.name.clone(), &expression, span);
-            //     }
-            // }
         }
     }
 
@@ -83,6 +111,16 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         } else {
             self.set_expression_is_valid(&boe.rhs, false, span);
             self.set_expression_is_valid(&boe.lhs, true, span);
+            match &boe.lhs.node {
+                Expression::Identifier(name) => {
+                    self.add_reference(name.node.name.clone(), &boe.rhs, span);
+                }
+                Expression::Member(_) => {
+                    // member identifier is known from when it was set to valid in set_expression_is_valid.
+                    self.add_reference(self.member_identifier.clone(), &boe.rhs, span);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -111,8 +149,30 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         );
 
         for argument in &call_expression.arguments {
+            if let Expression::UnaryOperator(uo) = &argument.node {
+                if UnaryOperator::Address == uo.node.operator.node {
+                    if let Expression::Identifier(identifier) = &uo.node.operand.node {
+                        let var = self.name_to_mut_var(&identifier.node.name);
+                        var.const_refs.clear();
+                        var.mut_refs.clear();
+                    }
+                }
+            }
             self.set_expression_is_valid(argument, false, span);
         }
+    }
+
+    // When 'const' is seen, make it so the next reference is const.
+    fn visit_type_qualifier(&mut self, type_qualifier: &'ast TypeQualifier, _: &'ast span::Span) {
+        if matches!(type_qualifier, TypeQualifier::Const) {
+            self.next_ref_const = true;
+        }
+    }
+
+    // Reset the flag so after this declaration, pointers are no longer marked const.
+    fn visit_declaration(&mut self, declaration: &'ast Declaration, span: &'ast span::Span) {
+        visit::visit_declaration(self, declaration, span);
+        self.next_ref_const = false;
     }
 
     // // =============================================== Small Expressions ===============================================
@@ -120,9 +180,11 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     fn visit_identifier(&mut self, identifier: &'ast Identifier, span: &'ast span::Span) {
         if self.member_count > 0 {
             self.member_identifier_pieces.push(identifier.name.clone());
-            self.announce_if_dead(self.member_identifier_pieces.join("."), span);
+            self.announce_no_ownership(self.member_identifier_pieces.join("."), span);
+            self.announce_invalid_reference(self.member_identifier_pieces.join("."), span);
         } else {
-            self.announce_if_dead(identifier.name.clone(), span);
+            self.announce_no_ownership(identifier.name.clone(), span);
+            self.announce_invalid_reference(identifier.name.clone(), span);
         }
     }
 
@@ -144,7 +206,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
             .push(member_expression.identifier.node.name.clone());
 
         if self.member_count > 0 || !self.mute_member_expression {
-            self.announce_if_dead(self.member_identifier_pieces.join("."), span);
+            self.announce_no_ownership(self.member_identifier_pieces.join("."), span);
         }
         if self.member_count == 0 {
             self.member_identifier = self.member_identifier_pieces.join(".");
@@ -153,20 +215,6 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     }
 
     // // =============================================== References ===============================================
-
-    // // References are not killed (&x does not kill x).
-    // fn visit_unary_operator_expression(
-    //     &mut self,
-    //     uoe: &'ast UnaryOperatorExpression,
-    //     span: &'ast span::Span,
-    // ) {
-    //     if let Expression::Identifier(operand) = &uoe.operand.node {
-    //         if uoe.operator.node == UnaryOperator::Address {
-    //             self.announce_if_new_ref_and_mutable(&operand.node.name, span)
-    //         }
-    //     }
-    //     visit::visit_unary_operator_expression(self, uoe, span);
-    // }
 
     // // =============================================== Control Flow ===============================================
     // This union logic might be better any time moving into a new statement, check the tree.
