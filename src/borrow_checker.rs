@@ -171,7 +171,7 @@ impl<'a> BorrowChecker<'a> {
         if matches!(variable.var_type, VarType::Owner(false)) {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
-                "ERROR: Dead identifier '{}' used on line {}.",
+                "ERROR: Use of moved value '{}' used on line {}.",
                 name, location.line
             );
         }

@@ -50,7 +50,7 @@ use lang_c::visit::*;
 use std::collections::HashMap;
 
 fn main() {
-    let file_path = "inputs\\kernel0.c";
+    let file_path = "inputs\\lifetime0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -67,7 +67,7 @@ fn main() {
 
         next_ref_const: false,
 
-        set_prints: PrintType::Ownership,
+        set_prints: PrintType::Reference,
         event_prints: PrintType::ErrorOnly,
     };
 
