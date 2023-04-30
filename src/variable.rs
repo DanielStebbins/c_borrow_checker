@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum VarType {
-    Owner(bool),
+    Copy,
+    Owner(String, bool),
     ConstRef(HashSet<Id>),
     MutRef(HashSet<Id>),
 }
@@ -25,15 +26,6 @@ impl Variable {
         Variable {
             id: Id { name, scope },
             var_type: var_type,
-            const_refs: HashSet::new(),
-            mut_refs: HashSet::new(),
-        }
-    }
-
-    pub fn new_owner(name: String, scope: usize) -> Self {
-        Variable {
-            id: Id { name, scope },
-            var_type: VarType::Owner(true),
             const_refs: HashSet::new(),
             mut_refs: HashSet::new(),
         }

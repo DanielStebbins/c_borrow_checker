@@ -1,0 +1,188 @@
+TranslationUnit
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "Owner"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "value"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "Owner"
+    ExternalDeclaration
+        FunctionDefinition
+            DeclarationSpecifier
+                TypeSpecifier Void
+            Declarator
+                DeclaratorKind
+                    Identifier "main"
+                DerivedDeclarator
+                    FunctionDeclarator
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeQualifier Const
+                            DeclarationSpecifier
+                                TypeSpecifier TypedefName
+                                    Identifier "Owner"
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "p1"
+                                DerivedDeclarator Pointer
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeSpecifier Int
+                            DeclarationSpecifier
+                                TypeQualifier Const
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "p2"
+                                DerivedDeclarator Pointer
+                        Ellipsis None
+            Statement Compound
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier TypedefName
+                                Identifier "Owner"
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "oldOwner"
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            Identifier "oldOwner"
+                                        Identifier "value"
+                                Expression
+                                    Constant
+                                        Integer "5"
+                                            IntegerBase Decimal
+                                            IntegerSuffix false false
+                                                IntegerSize Int
+                                BinaryOperator Assign
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier TypedefName
+                                Identifier "Owner"
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "newOwner"
+                            Initializer
+                                Expression
+                                    Identifier "oldOwner"
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            Identifier "oldOwner"
+                                        Identifier "value"
+                                Expression
+                                    Constant
+                                        Integer "3"
+                                            IntegerBase Decimal
+                                            IntegerSuffix false false
+                                                IntegerSize Int
+                                BinaryOperator Assign
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier TypedefName
+                                Identifier "Owner"
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "x"
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    Identifier "oldOwner"
+                                Expression
+                                    Identifier "x"
+                                BinaryOperator Assign
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            Identifier "oldOwner"
+                                        Identifier "value"
+                                Expression
+                                    Constant
+                                        Integer "3"
+                                            IntegerBase Decimal
+                                            IntegerSuffix false false
+                                                IntegerSize Int
+                                BinaryOperator Assign
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier Int
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "y"
+                            Initializer
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            Identifier "oldOwner"
+                                        Identifier "value"
+                BlockItem
+                    Statement
+                        Expression
+                            CallExpression
+                                Expression
+                                    Identifier "printf"
+                                Expression
+                                    StringLiteral ["\"%d\\n\""]
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            Identifier "oldOwner"
+                                        Identifier "value"
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    Identifier "oldOwner"
+                                Expression
+                                    Identifier "newOwner"
+                                BinaryOperator Assign
+                BlockItem
+                    Statement Return
+                        Expression
+                            Constant
+                                Integer "0"
+                                    IntegerBase Decimal
+                                    IntegerSuffix false false
+                                        IntegerSize Int

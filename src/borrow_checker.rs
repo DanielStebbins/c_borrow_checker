@@ -4,6 +4,7 @@ use lang_c::loc::*;
 use lang_c::span::*;
 use lang_c::visit::Visit;
 use lang_c::*;
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -17,8 +18,16 @@ pub enum PrintType {
 }
 
 pub struct BorrowChecker<'a> {
+    // For the user to specify what functions the checks should run on.
+    pub functions_to_check: Vec<String>,
+
     pub src: &'a str,
     pub scopes: Vec<HashMap<String, Variable>>,
+
+    // So the checker knows the types of struct members (need to know if they are copy types or not)
+    // and function parameters (need to know if they are marked const in the function header).
+    pub structs: HashMap<String, HashMap<String, VarType>>,
+    pub function_parameters: HashMap<String, Vec<VarType>>,
 
     // Struct member identifier compilation.
     pub mute_member_expression: bool,
@@ -26,14 +35,43 @@ pub struct BorrowChecker<'a> {
     pub member_identifier_pieces: Vec<String>,
     pub member_identifier: String,
 
-    // For identifying const references.
-    pub next_ref_const: bool,
+    // Function body scope creation is handled in the function definition block to include the parameters.
+    // This stops visit_statement from creating another new scope.
+    pub function_body: bool,
 
     pub set_prints: PrintType,
     pub event_prints: PrintType,
 }
 
-// Functions that mutate and print information about the dead variables.
+impl<'a> BorrowChecker<'a> {
+    pub fn new(source: &'a str, set_prints: PrintType, event_prints: PrintType) -> Self {
+        let unknown_variable = Variable::new("?".to_string(), 0, VarType::Copy);
+        let mut global_scope = HashMap::new();
+        global_scope.insert("?".to_string(), unknown_variable);
+
+        BorrowChecker {
+            functions_to_check: vec!["main".to_string()],
+
+            src: source,
+            scopes: vec![global_scope],
+
+            structs: HashMap::new(),
+            function_parameters: HashMap::new(),
+
+            mute_member_expression: false,
+            member_count: 0,
+            member_identifier_pieces: Vec::new(),
+            member_identifier: "".to_string(),
+
+            function_body: false,
+
+            set_prints: set_prints,
+            event_prints: event_prints,
+        }
+    }
+}
+
+// Functions that mutate and print information about the ownership of variables.
 impl<'a> BorrowChecker<'a> {
     // Finds the most local (highest count) scope where the given name exists.
     pub fn get_scope_number(&self, mut name: &str) -> usize {
@@ -73,7 +111,10 @@ impl<'a> BorrowChecker<'a> {
     pub fn name_to_var(&mut self, name: &str) -> &Variable {
         let count = self.get_scope_number(name);
         if !self.scopes[count].contains_key(name) {
-            self.scopes[count].insert(name.to_string(), Variable::new_owner(name.to_string(), 0));
+            self.scopes[count].insert(
+                name.to_string(),
+                Variable::new(name.to_string(), 0, VarType::Copy),
+            );
         }
         return self.scopes[count].get(name).unwrap();
     }
@@ -81,7 +122,10 @@ impl<'a> BorrowChecker<'a> {
     pub fn name_to_mut_var(&mut self, name: &str) -> &mut Variable {
         let count = self.get_scope_number(name);
         if !self.scopes[count].contains_key(name) {
-            self.scopes[count].insert(name.to_string(), Variable::new_owner(name.to_string(), 0));
+            self.scopes[count].insert(
+                name.to_string(),
+                Variable::new(name.to_string(), 0, VarType::Copy),
+            );
         }
         return self.scopes[count].get_mut(name).unwrap();
     }
@@ -93,11 +137,11 @@ impl<'a> BorrowChecker<'a> {
         let variable: &mut Variable = self.name_to_mut_var(&name);
         let var_type: VarType = variable.var_type.clone();
 
-        if let VarType::Owner(had_ownership) = var_type {
+        if let VarType::Owner(type_name, had_ownership) = var_type {
             // Changing an variable's ownership invalidates all its references.
             variable.const_refs.clear();
             variable.mut_refs.clear();
-            variable.var_type = VarType::Owner(has_ownership);
+            variable.var_type = VarType::Owner(type_name, has_ownership);
 
             // Error / Debug prints.
             let (location, _) = get_location_for_offset(self.src, span.start);
@@ -132,7 +176,67 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
-    pub fn declare_variable(&mut self, name: String, var_type: VarType) {
+    pub fn declare_variable(
+        &mut self,
+        declarator: &Declarator,
+        specifiers: &Vec<Node<DeclarationSpecifier>>,
+        function_parameter: bool,
+    ) {
+        let DeclaratorKind::Identifier(identifier) = &declarator.kind.node else {
+            return;
+        };
+
+        let mut var_type: VarType = VarType::Copy;
+        if !declarator.derived.is_empty()
+            && matches!(&declarator.derived[0].node, DerivedDeclarator::Pointer(_))
+        {
+            // The first derived declarator says this variable is a pointer (Arrays not yet supported).
+            // If this pointer is a function parameter, it points to some unknown
+            let mut points_to = HashSet::new();
+            if function_parameter {
+                points_to.insert(self.get_id("?"));
+            }
+            var_type = VarType::MutRef(points_to.clone());
+            for specifier in specifiers {
+                match &specifier.node {
+                    DeclarationSpecifier::TypeQualifier(type_qualifier) => {
+                        // Const type qualifier (before the type specifier) turns the reference constant.
+                        if matches!(&type_qualifier.node, TypeQualifier::Const) {
+                            var_type = VarType::ConstRef(points_to.clone());
+                        }
+                    }
+                    DeclarationSpecifier::TypeSpecifier(_) => {
+                        // Once the type specifier is encountered, the reference can no longer be turned const.
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            // Either a copy type or an owner type.
+            for specifier in specifiers {
+                if let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node {
+                    match &type_specifier.node {
+                        TypeSpecifier::Struct(struct_type) => {
+                            let Some(identifier) = &struct_type.node.identifier else {
+                                break;
+                            };
+                            let struct_name = identifier.node.name.clone();
+                            var_type = VarType::Owner(struct_name, true);
+                        }
+                        TypeSpecifier::TypedefName(type_identifier) => {
+                            let type_name = type_identifier.node.name.clone();
+                            if self.structs.contains_key(&type_name) {
+                                var_type = VarType::Owner(type_name, true);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let name = identifier.node.name.clone();
+        println!("{}: {:?}", name, var_type);
         let scope: usize = self.scopes.len() - 1;
         self.scopes
             .last_mut()
@@ -168,7 +272,7 @@ impl<'a> BorrowChecker<'a> {
     pub fn announce_no_ownership(&mut self, name: String, &span: &span::Span) {
         // Creates the middle terms of a struct member identifier in the parent's scope.
         let variable = self.name_to_var(&name);
-        if matches!(variable.var_type, VarType::Owner(false)) {
+        if matches!(variable.var_type, VarType::Owner(_, false)) {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
                 "ERROR: Use of moved value '{}' used on line {}.",
@@ -189,9 +293,9 @@ impl<'a> BorrowChecker<'a> {
 
                     // Type-specific merging (ownership rounded down, points_to rounded up).
                     match &v.var_type {
-                        VarType::Owner(o1) => {
-                            if let VarType::Owner(o2) = variable.var_type {
-                                variable.var_type = VarType::Owner(*o1 && o2);
+                        VarType::Owner(type_name, o1) => {
+                            if let VarType::Owner(_, o2) = variable.var_type {
+                                variable.var_type = VarType::Owner(type_name.clone(), *o1 && o2);
                             }
                         }
                         VarType::ConstRef(points_to1) | VarType::MutRef(points_to1) => {
@@ -199,6 +303,7 @@ impl<'a> BorrowChecker<'a> {
                                 points_to2.extend(points_to1.clone());
                             }
                         }
+                        VarType::Copy => {}
                     }
                 } else {
                     // Inner scopes can create variables in outer scopes (unknown struct members, unknown globals).
@@ -214,12 +319,12 @@ impl<'a> BorrowChecker<'a> {
             "[{}]",
             self.scopes
                 .iter()
-                .skip(1)
+                // .skip(1)
                 .map(|s| {
                     let inner = s
                         .iter()
                         .map(|(k, v)| {
-                            if let VarType::Owner(has_ownership) = v.var_type {
+                            if let VarType::Owner(_, has_ownership) = v.var_type {
                                 format!("{k}:{}", has_ownership as i32)
                             } else {
                                 k.to_string()
@@ -372,12 +477,12 @@ impl<'a> BorrowChecker<'a> {
             "[{}]",
             self.scopes
                 .iter()
-                .skip(1)
+                // .skip(1)
                 .map(|s| {
                     let inner = s
                         .iter()
                         .map(|(k, v)| match &v.var_type {
-                            VarType::Owner(_) => {
+                            VarType::Copy | VarType::Owner(_, _) => {
                                 format!(
                                     "{{{}}},{{{}}}'->{}",
                                     v.const_refs

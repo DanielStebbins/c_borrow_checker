@@ -49,34 +49,27 @@ use lang_c::visit::*;
 
 use std::collections::HashMap;
 
+use std::io::Write;
+
 fn main() {
-    let file_path = "inputs\\lifetime0.c";
+    let file_path = "inputs\\ownership1.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
-    let mut ownership_checker = BorrowChecker {
-        src: &parse.source,
-        scopes: vec![HashMap::new()],
+    let mut ownership_checker =
+        BorrowChecker::new(&parse.source, PrintType::Reference, PrintType::Ownership);
 
-        mute_member_expression: false,
-        member_count: 0,
-        member_identifier_pieces: Vec::new(),
-        member_identifier: "".to_string(),
-
-        next_ref_const: false,
-
-        set_prints: PrintType::Reference,
-        event_prints: PrintType::ErrorOnly,
-    };
-
-    // let s = &mut String::new();
-    // let mut printer = Printer::new(s);
-    // printer.visit_translation_unit(&parse.unit);
-    // println!("{s}");
-
+    // Running the checker.
     ownership_checker.visit_translation_unit(&parse.unit);
+
+    // Printing the abstract syntax tree to a file.
+    let s = &mut String::new();
+    let mut printer = Printer::new(s);
+    printer.visit_translation_unit(&parse.unit);
+    let mut file = std::fs::File::create("ast.txt").expect("AST file creation failed");
+    file.write_all(s.as_bytes()).expect("AST file write failed");
 }
 
 // RUN                         cargo clippy            to view

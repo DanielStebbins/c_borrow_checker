@@ -10,9 +10,12 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     // Triggers scope changes.
     fn visit_statement(&mut self, statement: &'ast Statement, span: &'ast span::Span) {
         // Add a new scope layer for this block.
-        if let Statement::Compound(_) = statement {
-            self.scopes.push(HashMap::new());
+        if !self.function_body {
+            if let Statement::Compound(_) = statement {
+                self.scopes.push(HashMap::new());
+            }
         }
+        self.function_body = false;
 
         // Run the block.
         visit::visit_statement(self, statement, span);
@@ -28,6 +31,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 .map(|k| k.to_string())
                 .collect();
 
+            // Control flow rules applied at the end of block to enfore strictness.
             for name in lost {
                 let id = Id {
                     name: name,
@@ -46,12 +50,25 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                     }
                 }
             }
-
             self.scopes.pop();
         }
     }
 
     // =============================================== Assignments (make_live) ===============================================
+    fn visit_declaration(&mut self, declaration: &'ast Declaration, span: &'ast span::Span) {
+        for declarator in &declaration.declarators {
+            if let DeclaratorKind::Identifier(id) = &declarator.node.declarator.node.kind.node {
+                println!("{:?}", id.node.name);
+            }
+            self.declare_variable(
+                &declarator.node.declarator.node,
+                &declaration.specifiers,
+                false,
+            )
+        }
+        visit::visit_declaration(self, declaration, span);
+    }
+
     // Make identifiers valid if they are on the LHS of an assignment or are declared.
     fn visit_init_declarator(
         &mut self,
@@ -70,32 +87,10 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
 
         // LHS
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
-            // Matches with the first derived declarator, there are more.
-            if init_declarator.declarator.node.derived.is_empty() {
-                self.declare_variable(identifier.node.name.clone(), VarType::Owner(true))
-            } else {
-                match &init_declarator.declarator.node.derived[0].node {
-                    DerivedDeclarator::Pointer(_) => {
-                        if self.next_ref_const {
-                            self.declare_variable(
-                                identifier.node.name.clone(),
-                                VarType::ConstRef(HashSet::new()),
-                            );
-                        } else {
-                            self.declare_variable(
-                                identifier.node.name.clone(),
-                                VarType::MutRef(HashSet::new()),
-                            )
-                        }
-
-                        // Possibly adding a reference to the RHS, which requires the LHS's identifier.
-                        if let Some(ref initializer) = init_declarator.initializer {
-                            if let Initializer::Expression(expression) = &initializer.node {
-                                self.add_reference(identifier.node.name.clone(), &expression, span);
-                            }
-                        }
-                    }
-                    _ => {}
+            // Possibly adding a reference to the RHS, which requires the LHS's identifier.
+            if let Some(ref initializer) = init_declarator.initializer {
+                if let Initializer::Expression(expression) = &initializer.node {
+                    self.add_reference(identifier.node.name.clone(), &expression, span);
                 }
             }
         }
@@ -124,6 +119,37 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
+    // For things declared at the global scope. Currently only visits function defintions.
+    // Should visit other globals but w/o applying borrow checker rules to them.
+    fn visit_external_declaration(
+        &mut self,
+        external_declaration: &'ast ExternalDeclaration,
+        span: &'ast span::Span,
+    ) {
+        match external_declaration {
+            ExternalDeclaration::FunctionDefinition(function_definition) => {
+                self.visit_function_definition(&function_definition.node, span);
+            }
+            _ => {}
+        }
+    }
+
+    // Ignore any function definitions that the user did not specify to be checked.
+    fn visit_function_definition(
+        &mut self,
+        function_definition: &'ast FunctionDefinition,
+        span: &'ast span::Span,
+    ) {
+        if let DeclaratorKind::Identifier(id) = &function_definition.declarator.node.kind.node {
+            if self.functions_to_check.contains(&id.node.name) {
+                // Functions add the new scope early so it can include all their parameters.
+                self.function_body = true;
+                self.scopes.push(HashMap::new());
+                visit::visit_function_definition(self, function_definition, span)
+            }
+        }
+    }
+
     // // Parameters passed to a function are made live.
     fn visit_parameter_declaration(
         &mut self,
@@ -131,9 +157,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         _: &'ast span::Span,
     ) {
         if let Some(declarator) = &parameter_declaration.declarator {
-            if let DeclaratorKind::Identifier(identifier) = &declarator.node.kind.node {
-                // self.declare_variable(identifier.node.name.clone());
-            }
+            self.declare_variable(&declarator.node, &parameter_declaration.specifiers, true);
         }
     }
 
@@ -160,19 +184,6 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
             }
             self.set_expression_is_valid(argument, false, span);
         }
-    }
-
-    // When 'const' is seen, make it so the next reference is const.
-    fn visit_type_qualifier(&mut self, type_qualifier: &'ast TypeQualifier, _: &'ast span::Span) {
-        if matches!(type_qualifier, TypeQualifier::Const) {
-            self.next_ref_const = true;
-        }
-    }
-
-    // Reset the flag so after this declaration, pointers are no longer marked const.
-    fn visit_declaration(&mut self, declaration: &'ast Declaration, span: &'ast span::Span) {
-        visit::visit_declaration(self, declaration, span);
-        self.next_ref_const = false;
     }
 
     // // =============================================== Small Expressions ===============================================
