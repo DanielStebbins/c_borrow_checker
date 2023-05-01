@@ -27,14 +27,15 @@ TODO:
     - Support += (AssignPlus) and other shorthand.
     - Count . and -> separately.
     - Clean the messy global scope.
-    - Reference errors.
-    - Lifetime errors.
+    - Return error.
     - Cannot move out of index of array.
+    - Struct members that haven't been seen before are assigned a type based on their parent struct's entry in the struct mapping.
+    - reference assignment errors / not errors
+    - &struct.member borrows whole struct.
+    - Ownership of dereferenced pointer values?
 */
 
 #![feature(iter_intersperse)]
-
-// use crate::borrow_checker::BorrowChecker;
 
 mod ast_traversal;
 mod borrow_checker;
@@ -46,8 +47,6 @@ use borrow_checker::PrintType;
 use lang_c::driver::*;
 use lang_c::print::*;
 use lang_c::visit::*;
-
-use std::collections::HashMap;
 
 use std::io::Write;
 

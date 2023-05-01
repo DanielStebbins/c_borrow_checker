@@ -4,12 +4,8 @@ use lang_c::loc::*;
 use lang_c::span::*;
 use lang_c::visit::Visit;
 use lang_c::*;
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::collections::HashSet;
-
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 pub enum PrintType {
     Ownership,
@@ -111,9 +107,11 @@ impl<'a> BorrowChecker<'a> {
     pub fn name_to_var(&mut self, name: &str) -> &Variable {
         let count = self.get_scope_number(name);
         if !self.scopes[count].contains_key(name) {
+            let var_type = self.get_member_var_type(name);
+            println!("Created new variable '{name}' of type {:?}", var_type);
             self.scopes[count].insert(
                 name.to_string(),
-                Variable::new(name.to_string(), 0, VarType::Copy),
+                Variable::new(name.to_string(), 0, var_type),
             );
         }
         return self.scopes[count].get(name).unwrap();
@@ -122,9 +120,11 @@ impl<'a> BorrowChecker<'a> {
     pub fn name_to_mut_var(&mut self, name: &str) -> &mut Variable {
         let count = self.get_scope_number(name);
         if !self.scopes[count].contains_key(name) {
+            let var_type = self.get_member_var_type(name);
+            println!("Created new variable '{name}' of type {:?}", var_type);
             self.scopes[count].insert(
                 name.to_string(),
-                Variable::new(name.to_string(), 0, VarType::Copy),
+                Variable::new(name.to_string(), 0, var_type),
             );
         }
         return self.scopes[count].get_mut(name).unwrap();
@@ -176,16 +176,12 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
-    pub fn declare_variable(
+    pub fn get_var_type(
         &mut self,
         declarator: &Declarator,
         specifiers: &Vec<Node<DeclarationSpecifier>>,
         function_parameter: bool,
-    ) {
-        let DeclaratorKind::Identifier(identifier) = &declarator.kind.node else {
-            return;
-        };
-
+    ) -> VarType {
         let mut var_type: VarType = VarType::Copy;
         if !declarator.derived.is_empty()
             && matches!(&declarator.derived[0].node, DerivedDeclarator::Pointer(_))
@@ -235,7 +231,66 @@ impl<'a> BorrowChecker<'a> {
                 }
             }
         }
+        return var_type;
+    }
+
+    pub fn get_member_var_type(&mut self, name: &str) -> VarType {
+        if !name.contains(".") {
+            println!("ISSUE: Unrecognized name '{name}' was not a struct member!");
+            return VarType::Copy;
+        }
+
+        let final_name = &name[name.rfind('.').unwrap() + 1..];
+        let parent_name = &name[..name.rfind('.').unwrap()];
+        let parent_type = self.name_to_var(parent_name).var_type.clone();
+        if let VarType::Owner(struct_name, _) = parent_type {
+            let fields = self
+                .structs
+                .get(&struct_name.to_string())
+                .expect("ISSUE: No struct of specified type");
+            return fields
+                .get(&final_name.to_string())
+                .expect("ISSUE: Parent struct had no matching field!")
+                .clone();
+        }
+        println!("ISSUE: No struct with name '{parent_name}'");
+        return VarType::Copy;
+    }
+
+    // Struct member delcarations use a different set of specifiers than regular declarations.
+    pub fn struct_specifier_to_declaration_specifier(
+        &self,
+        specifiers: &Vec<Node<SpecifierQualifier>>,
+    ) -> Vec<Node<DeclarationSpecifier>> {
+        let mut out = Vec::new();
+        for specifier in specifiers {
+            match &specifier.node {
+                SpecifierQualifier::TypeSpecifier(ts) => out.push(Node::new(
+                    DeclarationSpecifier::TypeSpecifier(ts.clone()),
+                    specifier.span,
+                )),
+                SpecifierQualifier::TypeQualifier(tq) => out.push(Node::new(
+                    DeclarationSpecifier::TypeQualifier(tq.clone()),
+                    specifier.span,
+                )),
+                _ => {}
+            }
+        }
+        return out;
+    }
+
+    pub fn declare_variable(
+        &mut self,
+        declarator: &Declarator,
+        specifiers: &Vec<Node<DeclarationSpecifier>>,
+        function_parameter: bool,
+    ) {
+        let DeclaratorKind::Identifier(identifier) = &declarator.kind.node else {
+            return;
+        };
+
         let name = identifier.node.name.clone();
+        let var_type = self.get_var_type(declarator, specifiers, function_parameter);
         println!("{}: {:?}", name, var_type);
         let scope: usize = self.scopes.len() - 1;
         self.scopes

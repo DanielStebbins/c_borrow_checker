@@ -2,10 +2,22 @@
 
 typedef struct Owner {
     int value;
+    const float tester;
+    const int *constRef;
+    int *mutRef;
 } Owner;
 
-void main(const Owner *p1, int const *p2)
+struct Test {
+    int x;
+    Owner testOwner;
+};
+
+void main(const Owner *p1, int *p2)
 {
+    struct Test test;
+    int z = 5;
+    test.testOwner.mutRef = &z;
+
     Owner oldOwner;
     oldOwner.value = 5;
     Owner newOwner = oldOwner;      // kills oldOwner.

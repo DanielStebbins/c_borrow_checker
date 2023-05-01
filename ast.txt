@@ -16,10 +16,64 @@ TranslationUnit
                                     Declarator
                                         DeclaratorKind
                                             Identifier "value"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeQualifier Const
+                                SpecifierQualifier
+                                    TypeSpecifier Float
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "tester"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeQualifier Const
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "constRef"
+                                        DerivedDeclarator Pointer
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "mutRef"
+                                        DerivedDeclarator Pointer
             InitDeclarator
                 Declarator
                     DeclaratorKind
                         Identifier "Owner"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "Test"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "x"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "Owner"
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "testOwner"
     ExternalDeclaration
         FunctionDefinition
             DeclarationSpecifier
@@ -42,14 +96,58 @@ TranslationUnit
                         ParameterDeclaration
                             DeclarationSpecifier
                                 TypeSpecifier Int
-                            DeclarationSpecifier
-                                TypeQualifier Const
                             Declarator
                                 DeclaratorKind
                                     Identifier "p2"
                                 DerivedDeclarator Pointer
                         Ellipsis None
             Statement Compound
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier
+                                StructType
+                                    StructKind Struct
+                                    Identifier "Test"
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "test"
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier Int
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "z"
+                            Initializer
+                                Expression
+                                    Constant
+                                        Integer "5"
+                                            IntegerBase Decimal
+                                            IntegerSuffix false false
+                                                IntegerSize Int
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            MemberExpression
+                                                MemberOperator Direct
+                                                Expression
+                                                    Identifier "test"
+                                                Identifier "testOwner"
+                                        Identifier "mutRef"
+                                Expression
+                                    UnaryOperatorExpression
+                                        UnaryOperator Address
+                                        Expression
+                                            Identifier "z"
+                                BinaryOperator Assign
                 BlockItem
                     Declaration
                         DeclarationSpecifier

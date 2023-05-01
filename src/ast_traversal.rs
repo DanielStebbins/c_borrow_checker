@@ -128,7 +128,68 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     ) {
         match external_declaration {
             ExternalDeclaration::FunctionDefinition(function_definition) => {
-                self.visit_function_definition(&function_definition.node, span);
+                self.visit_function_definition(
+                    &function_definition.node,
+                    &function_definition.span,
+                );
+            }
+            ExternalDeclaration::Declaration(declaration) => {
+                let mut struct_names = HashSet::new();
+                let mut struct_members: HashMap<String, VarType> = HashMap::new();
+                for specifier in &declaration.node.specifiers {
+                    let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node else {
+                        continue;
+                    };
+
+                    let TypeSpecifier::Struct(struct_type) = &type_specifier.node else {
+                        continue;
+                    };
+
+                    if let Some(id) = &struct_type.node.identifier {
+                        struct_names.insert(id.node.name.clone());
+                    }
+
+                    let Some(declarations) = &struct_type.node.declarations else {
+                        continue;
+                    };
+
+                    // Adding fields to the struct_members mapping from names to VarType.
+                    for struct_declaration in declarations {
+                        let StructDeclaration::Field(field) = &struct_declaration.node else {
+                            continue;
+                        };
+                        for struct_declarator in &field.node.declarators {
+                            if let Some(field_declarator) = &struct_declarator.node.declarator {
+                                let var_type = self.get_var_type(
+                                    &field_declarator.node,
+                                    &self.struct_specifier_to_declaration_specifier(
+                                        &field.node.specifiers,
+                                    ),
+                                    false,
+                                );
+                                if let DeclaratorKind::Identifier(id) =
+                                    &field_declarator.node.kind.node
+                                {
+                                    struct_members.insert(id.node.name.clone(), var_type);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Getting any typdef names of this struct.
+                for init_declarator in &declaration.node.declarators {
+                    if let DeclaratorKind::Identifier(id) =
+                        &init_declarator.node.declarator.node.kind.node
+                    {
+                        struct_names.insert(id.node.name.clone());
+                    }
+                }
+
+                // Adding this struct information under any of its possible names.
+                for name in struct_names {
+                    self.structs.insert(name, struct_members.clone());
+                }
             }
             _ => {}
         }
