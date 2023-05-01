@@ -20,6 +20,7 @@ Limitations:
     - No library imports in the input. The checker will try to analyze the whole library. This means it's unaware of library function signatures.
     - To get line-by-line prints, each block (if, for, while, ...) must have {}
     - No &&x, only &x are recognized as references because they are immeditately followed by an identifier.
+    - Ellipses functions like printf(fnoojefo, ...); assume strictness (&x treated as mut, x treated as owner).
 */
 
 /*
@@ -29,10 +30,14 @@ TODO:
     - Clean the messy global scope.
     - Return error.
     - Cannot move out of index of array.
-    - Struct members that haven't been seen before are assigned a type based on their parent struct's entry in the struct mapping.
-    - reference assignment errors / not errors
+    - Functions make mut / const pointers and take ownership based on signature.
+    - reference assignment errors / not errors, also function calls.
     - &struct.member borrows whole struct.
-    - Ownership of dereferenced pointer values?
+    - No moving ownership out of references with dereferencing on RHS.
+    - Globals (scope 0) cannot move ownership and cannot have mutable references.
+    - Loop control flow.
+
+    - Why no parameters in variable dictionary?
 */
 
 #![feature(iter_intersperse)]
@@ -58,7 +63,7 @@ fn main() {
     let parse = result.expect("Parsing Error!\n");
 
     let mut ownership_checker =
-        BorrowChecker::new(&parse.source, PrintType::ErrorOnly, PrintType::ErrorOnly);
+        BorrowChecker::new(&parse.source, PrintType::Ownership, PrintType::Ownership);
 
     // Running the checker.
     ownership_checker.visit_translation_unit(&parse.unit);

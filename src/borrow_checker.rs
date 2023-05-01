@@ -23,7 +23,7 @@ pub struct BorrowChecker<'a> {
     // So the checker knows the types of struct members (need to know if they are copy types or not)
     // and function parameters (need to know if they are marked const in the function header).
     pub structs: HashMap<String, HashMap<String, VarType>>,
-    pub function_parameters: HashMap<String, Vec<VarType>>,
+    pub functions: HashMap<String, Vec<VarType>>,
 
     // Struct member identifier compilation.
     pub mute_member_expression: bool,
@@ -52,7 +52,7 @@ impl<'a> BorrowChecker<'a> {
             scopes: vec![global_scope],
 
             structs: HashMap::new(),
-            function_parameters: HashMap::new(),
+            functions: HashMap::new(),
 
             mute_member_expression: false,
             member_count: 0,
@@ -95,7 +95,7 @@ impl<'a> BorrowChecker<'a> {
         };
     }
 
-    pub fn id_to_var(&mut self, id: &Id) -> &Variable {
+    pub fn id_to_var(&self, id: &Id) -> &Variable {
         return self.scopes[id.scope].get(&id.name).unwrap();
     }
 
@@ -177,10 +177,9 @@ impl<'a> BorrowChecker<'a> {
     }
 
     pub fn get_var_type(
-        &mut self,
+        &self,
         declarator: &Declarator,
         specifiers: &Vec<Node<DeclarationSpecifier>>,
-        function_parameter: bool,
     ) -> VarType {
         let mut var_type: VarType = VarType::Copy;
         if !declarator.derived.is_empty()
@@ -228,6 +227,90 @@ impl<'a> BorrowChecker<'a> {
             }
         }
         return var_type;
+    }
+
+    pub fn add_struct(&mut self, declaration: &Node<Declaration>) {
+        let mut struct_names = HashSet::new();
+        let mut struct_members: HashMap<String, VarType> = HashMap::new();
+        for specifier in &declaration.node.specifiers {
+            let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node else {
+                continue;
+            };
+
+            let TypeSpecifier::Struct(struct_type) = &type_specifier.node else {
+                continue;
+            };
+
+            if let Some(id) = &struct_type.node.identifier {
+                struct_names.insert(id.node.name.clone());
+            }
+
+            let Some(declarations) = &struct_type.node.declarations else {
+                continue;
+            };
+
+            // Adding fields to the struct_members mapping from names to VarType.
+            for struct_declaration in declarations {
+                let StructDeclaration::Field(field) = &struct_declaration.node else {
+                    continue;
+                };
+                for struct_declarator in &field.node.declarators {
+                    if let Some(field_declarator) = &struct_declarator.node.declarator {
+                        let var_type = self.get_var_type(
+                            &field_declarator.node,
+                            &self.struct_specifier_to_declaration_specifier(&field.node.specifiers),
+                        );
+                        if let DeclaratorKind::Identifier(id) = &field_declarator.node.kind.node {
+                            struct_members.insert(id.node.name.clone(), var_type);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Getting any typdef names of this struct.
+        for init_declarator in &declaration.node.declarators {
+            if let DeclaratorKind::Identifier(id) = &init_declarator.node.declarator.node.kind.node
+            {
+                struct_names.insert(id.node.name.clone());
+            }
+        }
+
+        // Adding this struct information under any of its possible names.
+        // if !struct_members.is_empty() {
+        for name in struct_names {
+            self.structs.insert(name, struct_members.clone());
+        }
+        // }
+    }
+
+    // Adds a function declaration to the function mapping to track its parameter types.
+    pub fn add_function(
+        &mut self,
+        declarator: &Node<Declarator>,
+        parameter_declarations: &Vec<Node<ParameterDeclaration>>,
+    ) {
+        let DeclaratorKind::Identifier(function_id) = &declarator.node.kind.node else {
+            return;
+        };
+        let function_name = function_id.node.name.clone();
+        let mut function_parameters = Vec::new();
+        for parameter_declaration in parameter_declarations {
+            let Some(parameter_declarator) = &parameter_declaration.node.declarator else {
+                continue;
+            };
+            // function_parameter is passed as false because that is for adding the variable to the scope of the function bodies we're analyzing.
+            let parameter_type = self.get_var_type(
+                &parameter_declarator.node,
+                &parameter_declaration.node.specifiers,
+            );
+            function_parameters.push(parameter_type);
+        }
+        println!(
+            "Added a new function '{function_name}' with parameters: {:?}",
+            function_parameters
+        );
+        self.functions.insert(function_name, function_parameters);
     }
 
     pub fn get_member_var_type(&mut self, name: &str) -> VarType {
@@ -287,7 +370,7 @@ impl<'a> BorrowChecker<'a> {
         };
 
         let name = identifier.node.name.clone();
-        let var_type = self.get_var_type(declarator, specifiers, function_parameter);
+        let var_type = self.get_var_type(declarator, specifiers);
         let scope: usize = self.scopes.len() - 1;
         self.scopes
             .last_mut()

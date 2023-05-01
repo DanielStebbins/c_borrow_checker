@@ -1,8 +1,14 @@
-// int foo(int a);
+typedef int randomType;
 
-int foo(int a) {
-    return a;
-}
+struct TestStruct {
+    int x;
+};
+
+typedef struct Test2 {
+    int value;
+} TestTypeDef;
+
+int foo(int *a, const int *b, float c, struct TestStruct d, TestTypeDef e, randomType *f, randomType g);
 
 void main() {
     printf("%d\n", foo(2));

@@ -63,7 +63,10 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 false,
             )
         }
-        visit::visit_declaration(self, declaration, span);
+        // Stolen from visit::visit_declaration, edited to stop visiting specifiers (it was trying to create variables for type identifiers.)
+        for declarator in &declaration.declarators {
+            self.visit_init_declarator(&declarator.node, &declarator.span);
+        }
     }
 
     // Make identifiers valid if they are on the LHS of an assignment or are declared.
@@ -125,67 +128,34 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     ) {
         match external_declaration {
             ExternalDeclaration::FunctionDefinition(function_definition) => {
+                // For function definitions, which we might want to check.
                 self.visit_function_definition(
                     &function_definition.node,
                     &function_definition.span,
                 );
             }
             ExternalDeclaration::Declaration(declaration) => {
-                let mut struct_names = HashSet::new();
-                let mut struct_members: HashMap<String, VarType> = HashMap::new();
+                // For struct definitions, which we use to know the types of undeclared struct members.
                 for specifier in &declaration.node.specifiers {
-                    let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node else {
-                        continue;
-                    };
-
-                    let TypeSpecifier::Struct(struct_type) = &type_specifier.node else {
-                        continue;
-                    };
-
-                    if let Some(id) = &struct_type.node.identifier {
-                        struct_names.insert(id.node.name.clone());
-                    }
-
-                    let Some(declarations) = &struct_type.node.declarations else {
-                        continue;
-                    };
-
-                    // Adding fields to the struct_members mapping from names to VarType.
-                    for struct_declaration in declarations {
-                        let StructDeclaration::Field(field) = &struct_declaration.node else {
-                            continue;
-                        };
-                        for struct_declarator in &field.node.declarators {
-                            if let Some(field_declarator) = &struct_declarator.node.declarator {
-                                let var_type = self.get_var_type(
-                                    &field_declarator.node,
-                                    &self.struct_specifier_to_declaration_specifier(
-                                        &field.node.specifiers,
-                                    ),
-                                    false,
-                                );
-                                if let DeclaratorKind::Identifier(id) =
-                                    &field_declarator.node.kind.node
-                                {
-                                    struct_members.insert(id.node.name.clone(), var_type);
-                                }
-                            }
+                    if let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node {
+                        if let TypeSpecifier::Struct(_) = &type_specifier.node {
+                            self.add_struct(declaration);
                         }
                     }
                 }
 
-                // Getting any typdef names of this struct.
+                // For function declarations, which we use to know what to do at each function call.
                 for init_declarator in &declaration.node.declarators {
-                    if let DeclaratorKind::Identifier(id) =
-                        &init_declarator.node.declarator.node.kind.node
-                    {
-                        struct_names.insert(id.node.name.clone());
+                    for derived_declarator in &init_declarator.node.declarator.node.derived {
+                        if let DerivedDeclarator::Function(function_declarator) =
+                            &derived_declarator.node
+                        {
+                            self.add_function(
+                                &init_declarator.node.declarator,
+                                &function_declarator.node.parameters,
+                            );
+                        }
                     }
-                }
-
-                // Adding this struct information under any of its possible names.
-                for name in struct_names {
-                    self.structs.insert(name, struct_members.clone());
                 }
             }
             _ => {}
@@ -203,7 +173,18 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 // Functions add the new scope early so it can include all their parameters.
                 self.function_body = true;
                 self.scopes.push(HashMap::new());
-                visit::visit_function_definition(self, function_definition, span)
+
+                // Copied from visit::visti_function_definition to remove the declarator visit (the function name is not a variable).
+                for specifier in &function_definition.specifiers {
+                    self.visit_declaration_specifier(&specifier.node, &specifier.span);
+                }
+                for declaration in &function_definition.declarations {
+                    self.visit_declaration(&declaration.node, &declaration.span);
+                }
+                self.visit_statement(
+                    &function_definition.statement.node,
+                    &function_definition.statement.span,
+                );
             }
         }
     }
@@ -219,28 +200,80 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
+    // Function calls in checked funtions, like foo(x);
     fn visit_call_expression(
         &mut self,
         call_expression: &'ast CallExpression,
         span: &'ast span::Span,
     ) {
-        visit::visit_expression(
-            self,
-            &call_expression.callee.node,
-            &call_expression.callee.span,
-        );
+        // Does not visit the function name expression, to avoid creating a variable for the function identifier.
+        let Expression::Identifier(function_id) = &call_expression.callee.node else {
+            return;
+        };
 
+        let function_name = &function_id.node.name;
+        let Some(function_parameters) = self.functions.get(function_name) else {
+            println!("ISSUE: Function name '{function_name}' not defined!");
+            return;
+        };
+        let parameters_clone = function_parameters.clone();
+        let mut argument_index = 0;
         for argument in &call_expression.arguments {
-            if let Expression::UnaryOperator(uo) = &argument.node {
-                if UnaryOperator::Address == uo.node.operator.node {
-                    if let Expression::Identifier(identifier) = &uo.node.operand.node {
-                        let var = self.name_to_mut_var(&identifier.node.name);
-                        var.const_refs.clear();
-                        var.mut_refs.clear();
+            match &argument.node {
+                Expression::UnaryOperator(uo) => {
+                    if UnaryOperator::Address == uo.node.operator.node {
+                        if let Expression::Identifier(identifier) = &uo.node.operand.node {
+                            // The argument looks like &x.
+                            if argument_index > parameters_clone.len()
+                                || matches!(parameters_clone[argument_index], VarType::MutRef(_))
+                            {
+                                // Passing a mutable reference makes all previous mut and const references invalid.
+                                let var = self.name_to_mut_var(&identifier.node.name);
+                                var.const_refs.clear();
+                                var.mut_refs.clear();
+                            } else {
+                                // Passing a const reference makes all previous mut references invalid.
+                                let var = self.name_to_mut_var(&identifier.node.name);
+                                var.mut_refs.clear();
+                            }
+                        }
                     }
                 }
+                _ => {
+                    // If not a reference, try to set as not owner. Won't do anything if it isn't an owner type.
+                    self.set_expression_is_valid(argument, false, span);
+                } // parameters_clone[argument_index]
+                  // VarType::Copy => {}
+                  // VarType::Owner(_, _) => {
+                  //     self.set_expression_is_valid(argument, false, span);
+                  // }
+                  // VarType::ConstRef(_) => {
+                  //     if let Expression::UnaryOperator(uo) = &argument.node {
+                  //         if UnaryOperator::Address == uo.node.operator.node {
+                  //             // The argument looks like &x.
+                  //             if let Expression::Identifier(identifier) = &uo.node.operand.node {
+                  //                 // Passing a const reference makes all previous mut references invalid.
+                  //                 let var = self.name_to_mut_var(&identifier.node.name);
+                  //                 var.mut_refs.clear();
+                  //             }
+                  //         }
+                  //     }
+                  // }
+                  // VarType::MutRef(_) => {
+                  //     if let Expression::UnaryOperator(uo) = &argument.node {
+                  //         if UnaryOperator::Address == uo.node.operator.node {
+                  //             // The argument looks like &x.
+                  //             if let Expression::Identifier(identifier) = &uo.node.operand.node {
+                  //                 // Passing a mutable reference makes all previous mut and const references invalid.
+                  //                 let var = self.name_to_mut_var(&identifier.node.name);
+                  //                 var.const_refs.clear();
+                  //                 var.mut_refs.clear();
+                  //             }
+                  //         }
+                  //     }
+                  // }
             }
-            self.set_expression_is_valid(argument, false, span);
+            argument_index += 1;
         }
     }
 

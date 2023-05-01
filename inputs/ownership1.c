@@ -1,5 +1,7 @@
 // Struct values, with ownership of both structs and members being tested.
 
+#include <stdio.h>
+
 typedef struct Owner {
     int value;
     const float tester;
@@ -12,11 +14,17 @@ struct Test {
     Owner testOwner;
 };
 
+typedef int randomWord;
+
 void main(const Owner *p1, int *p2)
 {
+    randomWord random = 5;
     struct Test test;
     int z = 5;
-    test.testOwner.mutRef = &z;
+    test.testOwner.mutRef = &z;         // Creates variables for previously unknown names test.testOwner and test.testOwner.mutRef.
+    Owner testKill = test.testOwner;    // kills test.testOwner.
+    struct Test newTest;
+    test = newTest;                     // makes live test and any owner-type members of test.
 
     Owner oldOwner;
     oldOwner.value = 5;
@@ -25,8 +33,8 @@ void main(const Owner *p1, int *p2)
     Owner x;
     oldOwner = x;                   // lives oldOwner, kills x.
     oldOwner.value = 3;             // oldOwner is now alive.
-    int y = oldOwner.value;         // kills oldOwner.value, but not oldOwner.
-    printf("%d\n", oldOwner.value); // ERROR: oldOwner.value is dead.
-    oldOwner = newOwner;            // makes live oldOwner and oldOwner.value, as assigning a whole new struct brings a new member value.
+    int y = oldOwner.value;         // no effect, since oldOwner.value is a copy type.
+    printf("%d\n", oldOwner);
+    oldOwner = newOwner;            // makes live oldOwner and any owner-type members of oldOwner.
     return 0;
 }
