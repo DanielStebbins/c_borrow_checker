@@ -58,7 +58,7 @@ fn main() {
     let parse = result.expect("Parsing Error!\n");
 
     let mut ownership_checker =
-        BorrowChecker::new(&parse.source, PrintType::Reference, PrintType::Ownership);
+        BorrowChecker::new(&parse.source, PrintType::ErrorOnly, PrintType::ErrorOnly);
 
     // Running the checker.
     ownership_checker.visit_translation_unit(&parse.unit);

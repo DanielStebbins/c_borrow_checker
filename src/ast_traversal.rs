@@ -57,9 +57,6 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
     // =============================================== Assignments (make_live) ===============================================
     fn visit_declaration(&mut self, declaration: &'ast Declaration, span: &'ast span::Span) {
         for declarator in &declaration.declarators {
-            if let DeclaratorKind::Identifier(id) = &declarator.node.declarator.node.kind.node {
-                println!("{:?}", id.node.name);
-            }
             self.declare_variable(
                 &declarator.node.declarator.node,
                 &declaration.specifiers,

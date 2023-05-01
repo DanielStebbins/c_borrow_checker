@@ -188,17 +188,13 @@ impl<'a> BorrowChecker<'a> {
         {
             // The first derived declarator says this variable is a pointer (Arrays not yet supported).
             // If this pointer is a function parameter, it points to some unknown
-            let mut points_to = HashSet::new();
-            if function_parameter {
-                points_to.insert(self.get_id("?"));
-            }
-            var_type = VarType::MutRef(points_to.clone());
+            var_type = VarType::MutRef(HashSet::new());
             for specifier in specifiers {
                 match &specifier.node {
                     DeclarationSpecifier::TypeQualifier(type_qualifier) => {
                         // Const type qualifier (before the type specifier) turns the reference constant.
                         if matches!(&type_qualifier.node, TypeQualifier::Const) {
-                            var_type = VarType::ConstRef(points_to.clone());
+                            var_type = VarType::ConstRef(HashSet::new());
                         }
                     }
                     DeclarationSpecifier::TypeSpecifier(_) => {
@@ -279,6 +275,7 @@ impl<'a> BorrowChecker<'a> {
         return out;
     }
 
+    // Adds the variable's name to the proper scope mapping.
     pub fn declare_variable(
         &mut self,
         declarator: &Declarator,
@@ -291,12 +288,36 @@ impl<'a> BorrowChecker<'a> {
 
         let name = identifier.node.name.clone();
         let var_type = self.get_var_type(declarator, specifiers, function_parameter);
-        println!("{}: {:?}", name, var_type);
         let scope: usize = self.scopes.len() - 1;
         self.scopes
             .last_mut()
             .unwrap()
-            .insert(name.clone(), Variable::new(name, scope, var_type));
+            .insert(name.clone(), Variable::new(name.clone(), scope, var_type));
+
+        // Add the "?" unknown variable reference for pointer function arguments.
+        if function_parameter {
+            let unknown_id = self.get_id("?").clone();
+            let new_var = self.name_to_mut_var(&name);
+
+            match &mut new_var.var_type {
+                VarType::ConstRef(points_to) => {
+                    points_to.insert(unknown_id.clone());
+                }
+                VarType::MutRef(points_to) => {
+                    points_to.insert(unknown_id.clone());
+                }
+                _ => {}
+            }
+
+            let new_id = new_var.id.clone();
+            let new_type = new_var.var_type.clone();
+            let unknown_var = self.id_to_mut_var(&unknown_id);
+            match new_type {
+                VarType::ConstRef(_) => unknown_var.const_refs.insert(new_id),
+                VarType::MutRef(_) => unknown_var.mut_refs.insert(new_id),
+                _ => false,
+            };
+        }
     }
 
     pub fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
