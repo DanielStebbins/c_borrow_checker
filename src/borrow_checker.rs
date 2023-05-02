@@ -40,13 +40,18 @@ pub struct BorrowChecker<'a> {
 }
 
 impl<'a> BorrowChecker<'a> {
-    pub fn new(source: &'a str, set_prints: PrintType, event_prints: PrintType) -> Self {
+    pub fn new(
+        to_check: Vec<String>,
+        source: &'a str,
+        set_prints: PrintType,
+        event_prints: PrintType,
+    ) -> Self {
         let unknown_variable = Variable::new("?".to_string(), 0, VarType::Copy);
         let mut global_scope = HashMap::new();
         global_scope.insert("?".to_string(), unknown_variable);
 
         BorrowChecker {
-            functions_to_check: vec!["main".to_string()],
+            functions_to_check: to_check,
 
             src: source,
             scopes: vec![global_scope],

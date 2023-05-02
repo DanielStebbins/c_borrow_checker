@@ -135,11 +135,19 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 );
             }
             ExternalDeclaration::Declaration(declaration) => {
+                let mut no_visit = false;
                 // For struct definitions, which we use to know the types of undeclared struct members.
                 for specifier in &declaration.node.specifiers {
                     if let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node {
                         if let TypeSpecifier::Struct(_) = &type_specifier.node {
                             self.add_struct(declaration);
+                            return;
+                        }
+                    }
+                    if let DeclarationSpecifier::StorageClass(storage_class) = &specifier.node {
+                        if let StorageClassSpecifier::Typedef = &storage_class.node {
+                            // To stop typedefs from being treated as variables.
+                            no_visit = true;
                         }
                     }
                 }
@@ -154,8 +162,12 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                                 &init_declarator.node.declarator,
                                 &function_declarator.node.parameters,
                             );
+                            return;
                         }
                     }
+                }
+                if !no_visit {
+                    self.visit_declaration(&declaration.node, &declaration.span);
                 }
             }
             _ => {}

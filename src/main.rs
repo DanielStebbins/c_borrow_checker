@@ -56,14 +56,18 @@ use lang_c::visit::*;
 use std::io::Write;
 
 fn main() {
-    let file_path = "inputs\\ownership1.c";
+    let file_path = "inputs\\kernel0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
-    let mut ownership_checker =
-        BorrowChecker::new(&parse.source, PrintType::Ownership, PrintType::Ownership);
+    let mut ownership_checker = BorrowChecker::new(
+        vec!["perf_event_max_stack_handler".to_string()],
+        &parse.source,
+        PrintType::Ownership,
+        PrintType::Ownership,
+    );
 
     // Running the checker.
     ownership_checker.visit_translation_unit(&parse.unit);

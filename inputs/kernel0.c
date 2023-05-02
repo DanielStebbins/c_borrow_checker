@@ -1,6 +1,6 @@
 // the parser requires all types to be defined.
 struct ctl_table {
-
+	int *data;
 };
 
 typedef struct loff {

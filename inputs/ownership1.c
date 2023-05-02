@@ -1,6 +1,6 @@
 // Struct values, with ownership of both structs and members being tested.
 
-#include <stdio.h>
+// #include <stdio.h>
 
 typedef struct Owner {
     int value;
@@ -15,6 +15,8 @@ struct Test {
 };
 
 typedef int randomWord;
+
+int x = 5;
 
 void main(const Owner *p1, int *p2)
 {
