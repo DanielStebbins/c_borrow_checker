@@ -35,6 +35,12 @@ pub struct BorrowChecker<'a> {
     // This stops visit_statement from creating another new scope.
     pub function_body: bool,
 
+    // Tracks the previous struct name seen, for when pointers to structs are declared as function parameters.
+    pub previous_struct_name: String,
+
+    pub dereference_name: String,
+
+    // Controls what kind of output is shown.
     pub set_prints: PrintType,
     pub event_prints: PrintType,
 }
@@ -66,6 +72,10 @@ impl<'a> BorrowChecker<'a> {
 
             function_body: false,
 
+            previous_struct_name: "".to_string(),
+
+            dereference_name: "".to_string(),
+
             set_prints: set_prints,
             event_prints: event_prints,
         }
@@ -79,8 +89,6 @@ impl<'a> BorrowChecker<'a> {
         let mut count: usize = self.scopes.len() - 1;
         if name.contains(".") {
             name = &name[..name.find(".").unwrap()];
-        } else if name.contains("->") {
-            name = &name[..name.find("->").unwrap()];
         }
         for scope in self.scopes.iter().rev() {
             if scope.contains_key(name) {
@@ -105,6 +113,7 @@ impl<'a> BorrowChecker<'a> {
     }
 
     pub fn id_to_mut_var(&mut self, id: &Id) -> &mut Variable {
+        println!("id to mut var {}", id.name);
         return self.scopes[id.scope].get_mut(&id.name).unwrap();
     }
 
@@ -116,8 +125,9 @@ impl<'a> BorrowChecker<'a> {
             println!("Created new variable '{name}' of type {:?}", var_type);
             self.scopes[count].insert(
                 name.to_string(),
-                Variable::new(name.to_string(), 0, var_type),
+                Variable::new(name.to_string(), 0, var_type.clone()),
             );
+            self.declare_unknown_global(name, var_type, false)
         }
         return self.scopes[count].get(name).unwrap();
     }
@@ -129,8 +139,9 @@ impl<'a> BorrowChecker<'a> {
             println!("Created new variable '{name}' of type {:?}", var_type);
             self.scopes[count].insert(
                 name.to_string(),
-                Variable::new(name.to_string(), 0, var_type),
+                Variable::new(name.to_string(), 0, var_type.clone()),
             );
+            self.declare_unknown_global(name, var_type, false)
         }
         return self.scopes[count].get_mut(name).unwrap();
     }
@@ -170,10 +181,9 @@ impl<'a> BorrowChecker<'a> {
     fn set_all_ownership(&mut self, name: String, has_ownership: bool, span: &span::Span) {
         self.set_ownership(name.clone(), has_ownership, span);
         let period = name.clone() + ".";
-        let arrow = name.clone() + "->";
         let related: Vec<String> = self.scopes[self.get_scope_number(&name)]
             .keys()
-            .filter(|k| k.starts_with(&period) || k.starts_with(&arrow))
+            .filter(|k| k.starts_with(&period))
             .map(|k| k.to_string())
             .collect();
         for member in related {
@@ -182,7 +192,7 @@ impl<'a> BorrowChecker<'a> {
     }
 
     pub fn get_var_type(
-        &self,
+        &mut self,
         declarator: &Declarator,
         specifiers: &Vec<Node<DeclarationSpecifier>>,
     ) -> VarType {
@@ -191,8 +201,8 @@ impl<'a> BorrowChecker<'a> {
             && matches!(&declarator.derived[0].node, DerivedDeclarator::Pointer(_))
         {
             // The first derived declarator says this variable is a pointer (Arrays not yet supported).
-            // If this pointer is a function parameter, it points to some unknown
             var_type = VarType::MutRef(HashSet::new());
+            self.previous_struct_name.clear();
             for specifier in specifiers {
                 match &specifier.node {
                     DeclarationSpecifier::TypeQualifier(type_qualifier) => {
@@ -201,8 +211,23 @@ impl<'a> BorrowChecker<'a> {
                             var_type = VarType::ConstRef(HashSet::new());
                         }
                     }
-                    DeclarationSpecifier::TypeSpecifier(_) => {
+                    DeclarationSpecifier::TypeSpecifier(type_specifier) => {
                         // Once the type specifier is encountered, the reference can no longer be turned const.
+                        match &type_specifier.node {
+                            TypeSpecifier::Struct(struct_type) => {
+                                if let Some(struct_id) = &struct_type.node.identifier {
+                                    self.previous_struct_name = struct_id.node.name.clone();
+                                }
+                            }
+                            TypeSpecifier::TypedefName(typedef_id) => {
+                                let typedef_name = typedef_id.node.name.clone();
+                                if self.structs.contains_key(&typedef_name) {
+                                    self.previous_struct_name = typedef_name;
+                                }
+                            }
+                            _ => {}
+                        }
+
                         break;
                     }
                     _ => {}
@@ -232,6 +257,28 @@ impl<'a> BorrowChecker<'a> {
             }
         }
         return var_type;
+    }
+
+    pub fn get_member_var_type(&mut self, name: &str) -> VarType {
+        if !name.contains(".") {
+            println!("ISSUE: Unrecognized name '{name}' was not a struct member!");
+            return VarType::Copy;
+        }
+        let final_name = &name[name.rfind('.').unwrap() + 1..];
+        let parent_name = &name[..name.rfind('.').unwrap()];
+        let parent_type = self.name_to_var(parent_name).var_type.clone();
+        if let VarType::Owner(struct_name, _) = parent_type {
+            let fields = self
+                .structs
+                .get(&struct_name.to_string())
+                .expect("ISSUE: No struct of specified type");
+            return fields
+                .get(&final_name.to_string())
+                .expect("ISSUE: Parent struct had no matching field!")
+                .clone();
+        }
+        println!("ISSUE: '{parent_name}' is not an owner (struct) type");
+        return VarType::Copy;
     }
 
     pub fn add_struct(&mut self, declaration: &Node<Declaration>) {
@@ -318,29 +365,6 @@ impl<'a> BorrowChecker<'a> {
         self.functions.insert(function_name, function_parameters);
     }
 
-    pub fn get_member_var_type(&mut self, name: &str) -> VarType {
-        if !name.contains(".") {
-            println!("ISSUE: Unrecognized name '{name}' was not a struct member!");
-            return VarType::Copy;
-        }
-
-        let final_name = &name[name.rfind('.').unwrap() + 1..];
-        let parent_name = &name[..name.rfind('.').unwrap()];
-        let parent_type = self.name_to_var(parent_name).var_type.clone();
-        if let VarType::Owner(struct_name, _) = parent_type {
-            let fields = self
-                .structs
-                .get(&struct_name.to_string())
-                .expect("ISSUE: No struct of specified type");
-            return fields
-                .get(&final_name.to_string())
-                .expect("ISSUE: Parent struct had no matching field!")
-                .clone();
-        }
-        println!("ISSUE: No struct with name '{parent_name}'");
-        return VarType::Copy;
-    }
-
     // Struct member delcarations use a different set of specifiers than regular declarations.
     pub fn struct_specifier_to_declaration_specifier(
         &self,
@@ -377,14 +401,37 @@ impl<'a> BorrowChecker<'a> {
         let name = identifier.node.name.clone();
         let var_type = self.get_var_type(declarator, specifiers);
         let scope: usize = self.scopes.len() - 1;
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .insert(name.clone(), Variable::new(name.clone(), scope, var_type));
+        self.scopes.last_mut().unwrap().insert(
+            name.clone(),
+            Variable::new(name.clone(), scope, var_type.clone()),
+        );
+        self.declare_unknown_global(&name, var_type, function_parameter);
+    }
 
-        // Add the "?" unknown variable reference for pointer function arguments.
-        if function_parameter {
-            let unknown_id = self.get_id("?").clone();
+    // Adds a new global for a function parameter pointer to point to (needed for pointers to structs).
+    pub fn declare_unknown_global(
+        &mut self,
+        name: &str,
+        var_type: VarType,
+        function_parameter: bool,
+    ) {
+        // Add the "?" unknown variable reference for pointers that are function arguments or struct members.
+        if (function_parameter || name.contains("."))
+            && matches!(var_type, VarType::ConstRef(_) | VarType::MutRef(_))
+        {
+            println!("Declare unknown global for {}", name);
+            let mut unknown_name = "?".to_string();
+            if !self.previous_struct_name.is_empty() {
+                unknown_name += &name;
+                let unknown_var_type = VarType::Owner(self.previous_struct_name.clone(), true);
+                self.scopes[0].insert(
+                    unknown_name.to_string(),
+                    Variable::new(unknown_name.to_string(), 0, unknown_var_type.clone()),
+                );
+                self.declare_unknown_global(&unknown_name, unknown_var_type, false)
+            }
+            let unknown_id = self.get_id(&unknown_name);
+
             let new_var = self.name_to_mut_var(&name);
 
             match &mut new_var.var_type {
@@ -408,6 +455,7 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    // Compiles the name of the current struct member name "x.y.z" into self.member_identifier.
     pub fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
         self.mute_member_expression = true;
         self.visit_member_expression(&member_expression.node, &member_expression.span);

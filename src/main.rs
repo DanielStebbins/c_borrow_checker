@@ -21,6 +21,8 @@ Limitations:
     - To get line-by-line prints, each block (if, for, while, ...) must have {}
     - No &&x, only &x are recognized as references because they are immeditately followed by an identifier.
     - Ellipses functions like printf(fnoojefo, ...); assume strictness (&x treated as mut, x treated as owner).
+    - No x->y, use (*x).y instead.
+    - Multiple function parameters of the same name that are pointers to struct types might collide on the assumed global they are pointing to.
 */
 
 /*
@@ -65,7 +67,7 @@ fn main() {
     let mut ownership_checker = BorrowChecker::new(
         vec!["perf_event_max_stack_handler".to_string()],
         &parse.source,
-        PrintType::Ownership,
+        PrintType::Reference,
         PrintType::Ownership,
     );
 

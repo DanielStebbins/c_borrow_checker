@@ -1,5 +1,6 @@
 void main() {
     int x = 5;
     int *m1 = &x;
-    int *m2 = m1;             // ERROR: propagating mutable reference m1 to mutable reference m2.
+    int *m2 = m1;             
+    foo(m1);            // ERROR: using invalid mutable reference m1.
 }

@@ -186,7 +186,13 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 self.function_body = true;
                 self.scopes.push(HashMap::new());
 
-                // Copied from visit::visti_function_definition to remove the declarator visit (the function name is not a variable).
+                // Copied from visit::visit_function_definition to replace the declarator visit with only visiting the derived declarators (the function name is not a variable).
+                for derived_declarator in &function_definition.declarator.node.derived {
+                    self.visit_derived_declarator(
+                        &derived_declarator.node,
+                        &derived_declarator.span,
+                    )
+                }
                 for specifier in &function_definition.specifiers {
                     self.visit_declaration_specifier(&specifier.node, &specifier.span);
                 }
@@ -254,36 +260,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 _ => {
                     // If not a reference, try to set as not owner. Won't do anything if it isn't an owner type.
                     self.set_expression_is_valid(argument, false, span);
-                } // parameters_clone[argument_index]
-                  // VarType::Copy => {}
-                  // VarType::Owner(_, _) => {
-                  //     self.set_expression_is_valid(argument, false, span);
-                  // }
-                  // VarType::ConstRef(_) => {
-                  //     if let Expression::UnaryOperator(uo) = &argument.node {
-                  //         if UnaryOperator::Address == uo.node.operator.node {
-                  //             // The argument looks like &x.
-                  //             if let Expression::Identifier(identifier) = &uo.node.operand.node {
-                  //                 // Passing a const reference makes all previous mut references invalid.
-                  //                 let var = self.name_to_mut_var(&identifier.node.name);
-                  //                 var.mut_refs.clear();
-                  //             }
-                  //         }
-                  //     }
-                  // }
-                  // VarType::MutRef(_) => {
-                  //     if let Expression::UnaryOperator(uo) = &argument.node {
-                  //         if UnaryOperator::Address == uo.node.operator.node {
-                  //             // The argument looks like &x.
-                  //             if let Expression::Identifier(identifier) = &uo.node.operand.node {
-                  //                 // Passing a mutable reference makes all previous mut and const references invalid.
-                  //                 let var = self.name_to_mut_var(&identifier.node.name);
-                  //                 var.const_refs.clear();
-                  //                 var.mut_refs.clear();
-                  //             }
-                  //         }
-                  //     }
-                  // }
+                }
             }
             argument_index += 1;
         }
@@ -328,10 +305,51 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // // =============================================== References ===============================================
+    // =============================================== References ===============================================
 
-    // // =============================================== Control Flow ===============================================
-    // This union logic might be better any time moving into a new statement, check the tree.
+    fn visit_unary_operator_expression(
+        &mut self,
+        uoe: &'ast UnaryOperatorExpression,
+        span: &'ast span::Span,
+    ) {
+        self.dereference_name.clear();
+        match &uoe.operator.node {
+            UnaryOperator::Indirection => match &uoe.operand.node {
+                Expression::Identifier(id) => {
+                    let var = self.name_to_var(&id.node.name);
+                    match &var.var_type {
+                        VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
+                            let pointed_to = points_to.iter().next().unwrap();
+                            self.dereference_name = pointed_to.name.clone();
+                        }
+                        _ => {}
+                    }
+                }
+                Expression::Member(member_expression) => {
+                    let member_pieces_backup = self.member_identifier_pieces.clone();
+                    self.get_member_expression_identifier(member_expression);
+                    let var = self.name_to_var(&self.member_identifier.clone());
+                    match &var.var_type {
+                        VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
+                            let pointed_to = points_to.iter().next().unwrap();
+                            self.dereference_name = pointed_to.name.clone();
+                        }
+                        _ => {}
+                    }
+                    self.member_identifier_pieces = member_pieces_backup;
+                }
+                _ => visit::visit_expression(self, &uoe.operand.node, &uoe.operand.span),
+            },
+            _ => visit::visit_unary_operator_expression(self, uoe, span),
+        }
+        // If this dereference is part of a member expression, add the result to the member expression name.
+        if self.member_count > 0 {
+            self.member_identifier_pieces
+                .push(self.dereference_name.clone());
+        }
+    }
+
+    // =============================================== Control Flow ===============================================
     fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
         self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
 

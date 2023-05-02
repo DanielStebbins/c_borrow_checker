@@ -11,7 +11,7 @@ typedef int size_t;             // the parser does not recognize size_t.
 
 // from callchain.c
 int perf_event_max_stack_handler(struct ctl_table *table, int write, void *buffer, size_t *lenp, loff_t *ppos) { 
-	int *value = table.data;
+	int *value = (*table).data;
 	int new_value = *value, ret;
 	struct ctl_table new_table = *table;
 
