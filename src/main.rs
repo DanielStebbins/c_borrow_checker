@@ -13,6 +13,7 @@ Ranting:
     - I can't know every field of every struct in an arbitrary program, so it must be possible to kill a label the first time I see it, without it ever having been alive.
     - Avoid unwrap() when possible
     - x = x     with dead x reports the error, but re-lives x anyways.
+    - C2Rust converter not very helpful because it uses 'unsafe' to avoid normal rust checks.
 */
 
 /*
@@ -21,22 +22,23 @@ Limitations:
     - To get line-by-line prints, each block (if, for, while, ...) must have {}
     - No &&x, only &x are recognized as references because they are immeditately followed by an identifier.
     - Ellipses functions like printf(fnoojefo, ...); assume strictness (&x treated as mut, x treated as owner).
-    - No x->y, use (*x).y instead.
     - Multiple function parameters of the same name that are pointers to struct types might collide on the assumed global they are pointing to.
     - Does not handle arrays.
+    - Does not check passing mismatched const/mut references to functions, as that does not effect the state of this function.
+
+    - Function prototypes must have names for their parameters.
+    - No x->y, use (*x).y instead.
+    - void pointers assume pointing to Copy types, so they become &i32 when converting to Rust.
+    - Function return types are ignored, so all the Rust functions are unless their return values are needed.
+    - Rust places extra restrictions on globals, so I passed them in as function parameters instead.
+    - Some unused struct fields that would require additional copy-pasting have been omitted. These have no effect on the output.
 */
 
 /*
 TODO:
     - Return error.
-    - Functions make mut / const pointers and take ownership based on signature.
-    - reference assignment errors / not errors, also function calls.
-    - &struct.member borrows whole struct.
     - No moving ownership out of references with dereferencing on RHS.
     - Globals (scope 0) cannot move ownership and cannot have mutable references.
-    - Loop control flow.
-
-    - Why no parameters in variable dictionary?
 */
 
 #![feature(iter_intersperse)]
@@ -55,17 +57,18 @@ use lang_c::visit::*;
 use std::io::Write;
 
 fn main() {
-    let file_path = "inputs\\lifetime3.c";
+    let file_path = "inputs\\kernel0\\kernel0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
     let mut ownership_checker = BorrowChecker::new(
-        vec!["foo".to_string()],
+        vec!["perf_event_max_stack_handler".to_string()],
         &parse.source,
+        false,
         PrintType::Reference,
-        PrintType::Reference,
+        PrintType::ErrorOnly,
     );
 
     // Running the checker.

@@ -21,16 +21,8 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         let before_scope = self.scopes.clone();
         visit::visit_statement(self, statement, span);
 
-        // Remove the block's scope layer.
+        // Merge the scopes, then remove the block's scope layer.
         if let Statement::Compound(_) = statement {
-            let scope = self.scopes.len() - 1;
-            let lost: Vec<String> = self
-                .scopes
-                .last()
-                .unwrap()
-                .keys()
-                .map(|k| k.to_string())
-                .collect();
             self.merge_scopes(&before_scope);
             self.scopes.pop();
         }
@@ -57,6 +49,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         init_declarator: &'ast InitDeclarator,
         span: &'ast span::Span,
     ) {
+        // Declaring the LHS variable is done in visit_declaration.
         // RHS
         if let Some(ref initializer) = init_declarator.initializer {
             match &initializer.node {
@@ -121,9 +114,14 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 // For struct definitions, which we use to know the types of undeclared struct members.
                 for specifier in &declaration.node.specifiers {
                     if let DeclarationSpecifier::TypeSpecifier(type_specifier) = &specifier.node {
-                        if let TypeSpecifier::Struct(_) = &type_specifier.node {
-                            self.add_struct(declaration);
-                            return;
+                        if let TypeSpecifier::Struct(struct_type) = &type_specifier.node {
+                            if let Some(struct_identifier) = &struct_type.node.identifier {
+                                let struct_name = &struct_identifier.node.name;
+                                if !self.structs.contains_key(struct_name) {
+                                    self.add_struct(declaration);
+                                    return;
+                                }
+                            }
                         }
                     }
                     if let DeclarationSpecifier::StorageClass(storage_class) = &specifier.node {
@@ -148,6 +146,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                         }
                     }
                 }
+                // Creates global variables.
                 if !no_visit {
                     self.visit_declaration(&declaration.node, &declaration.span);
                 }
@@ -238,7 +237,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                             }
                         }
                     } else {
-                        // usefull for *p (dereferencing).
+                        // useful for *p (dereferencing).
                         self.visit_unary_operator_expression(&uo.node, &uo.span);
                     }
                 }
@@ -305,7 +304,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 self.dereference_name.clear();
                 match &uoe.operand.node {
                     Expression::Identifier(id) => {
-                        self.visit_identifier(&id.node, &id.span);
+                        // self.visit_identifier(&id.node, &id.span);
                         let var = self.name_to_var(&id.node.name);
                         match &var.var_type {
                             VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {

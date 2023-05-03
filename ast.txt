@@ -1,13 +1,396 @@
 TranslationUnit
     ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier Int
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "size_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier Long
+            DeclarationSpecifier
+                TypeSpecifier Long
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "__kernel_loff_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier TypedefName
+                    Identifier "__kernel_loff_t"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "loff_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "ctl_table"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Void
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "data"
+                                        DerivedDeclarator Pointer
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "maxlen"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Void
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "extra1"
+                                        DerivedDeclarator Pointer
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Void
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "extra2"
+                                        DerivedDeclarator Pointer
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "counter"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "atomic_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier TypedefName
+                    Identifier "atomic_t"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "atomic_long_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier Unsigned
+                                SpecifierQualifier
+                                    TypeSpecifier Int
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "lock"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "arch_spinlock_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                StorageClassSpecifier Typedef
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "raw_spinlock"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "arch_spinlock_t"
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "raw_lock"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "raw_spinlock_t"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "list_head"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier
+                                        StructType
+                                            StructKind Struct
+                                            Identifier "list_head"
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "next"
+                                        DerivedDeclarator Pointer
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "prev"
+                                        DerivedDeclarator Pointer
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "mutex"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "atomic_long_t"
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "owner"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "raw_spinlock_t"
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "wait_lock"
+                        StructDeclaration
+                            StructField
+                                SpecifierQualifier
+                                    TypeSpecifier
+                                        StructType
+                                            StructKind Struct
+                                            Identifier "list_head"
+                                StructDeclarator
+                                    Declarator
+                                        DeclaratorKind
+                                            Identifier "wait_list"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier Int
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "proc_dointvec_minmax"
+                    DerivedDeclarator
+                        FunctionDeclarator
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier
+                                        StructType
+                                            StructKind Struct
+                                            Identifier "ctl_table"
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "table"
+                                    DerivedDeclarator Pointer
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier Int
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "write"
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier Void
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "buffer"
+                                    DerivedDeclarator Pointer
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "size_t"
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "len"
+                                    DerivedDeclarator Pointer
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "loff_t"
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "pos"
+                                    DerivedDeclarator Pointer
+                            Ellipsis None
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier Void
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "mutex_lock"
+                    DerivedDeclarator
+                        FunctionDeclarator
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier
+                                        StructType
+                                            StructKind Struct
+                                            Identifier "mutex"
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "lock"
+                                    DerivedDeclarator Pointer
+                            Ellipsis None
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier Int
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "atomic_read"
+                    DerivedDeclarator
+                        FunctionDeclarator
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeQualifier Const
+                                DeclarationSpecifier
+                                    TypeSpecifier TypedefName
+                                        Identifier "atomic_t"
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "v"
+                                    DerivedDeclarator Pointer
+                            Ellipsis None
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier Void
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "mutex_unlock"
+                    DerivedDeclarator
+                        FunctionDeclarator
+                            ParameterDeclaration
+                                DeclarationSpecifier
+                                    TypeSpecifier
+                                        StructType
+                                            StructKind Struct
+                                            Identifier "mutex"
+                                Declarator
+                                    DeclaratorKind
+                                        Identifier "lock"
+                                    DerivedDeclarator Pointer
+                            Ellipsis None
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier TypedefName
+                    Identifier "atomic_t"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "nr_callchain_events"
+    ExternalDeclaration
+        Declaration
+            DeclarationSpecifier
+                TypeSpecifier
+                    StructType
+                        StructKind Struct
+                        Identifier "mutex"
+            InitDeclarator
+                Declarator
+                    DeclaratorKind
+                        Identifier "callchain_mutex"
+    ExternalDeclaration
         FunctionDefinition
             DeclarationSpecifier
                 TypeSpecifier Int
             Declarator
                 DeclaratorKind
-                    Identifier "foo"
-                DerivedDeclarator Pointer
-                DerivedDeclarator KRFunction
+                    Identifier "perf_event_max_stack_handler"
+                DerivedDeclarator
+                    FunctionDeclarator
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeSpecifier
+                                    StructType
+                                        StructKind Struct
+                                        Identifier "ctl_table"
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "table"
+                                DerivedDeclarator Pointer
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeSpecifier Int
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "write"
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeSpecifier Void
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "buffer"
+                                DerivedDeclarator Pointer
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeSpecifier TypedefName
+                                    Identifier "size_t"
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "lenp"
+                                DerivedDeclarator Pointer
+                        ParameterDeclaration
+                            DeclarationSpecifier
+                                TypeSpecifier TypedefName
+                                    Identifier "loff_t"
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "ppos"
+                                DerivedDeclarator Pointer
+                        Ellipsis None
             Statement Compound
                 BlockItem
                     Declaration
@@ -16,18 +399,170 @@ TranslationUnit
                         InitDeclarator
                             Declarator
                                 DeclaratorKind
-                                    Identifier "x"
+                                    Identifier "value"
+                                DerivedDeclarator Pointer
                             Initializer
                                 Expression
-                                    Constant
-                                        Integer "5"
-                                            IntegerBase Decimal
-                                            IntegerSuffix false false
-                                                IntegerSize Int
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            UnaryOperatorExpression
+                                                UnaryOperator Indirection
+                                                Expression
+                                                    Identifier "table"
+                                        Identifier "data"
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier Int
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "new_value"
+                            Initializer
+                                Expression
+                                    UnaryOperatorExpression
+                                        UnaryOperator Indirection
+                                        Expression
+                                            Identifier "value"
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "ret"
+                BlockItem
+                    Declaration
+                        DeclarationSpecifier
+                            TypeSpecifier
+                                StructType
+                                    StructKind Struct
+                                    Identifier "ctl_table"
+                        InitDeclarator
+                            Declarator
+                                DeclaratorKind
+                                    Identifier "new_table"
+                            Initializer
+                                Expression
+                                    UnaryOperatorExpression
+                                        UnaryOperator Indirection
+                                        Expression
+                                            Identifier "table"
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    MemberExpression
+                                        MemberOperator Direct
+                                        Expression
+                                            Identifier "new_table"
+                                        Identifier "data"
+                                Expression
+                                    UnaryOperatorExpression
+                                        UnaryOperator Address
+                                        Expression
+                                            Identifier "new_value"
+                                BinaryOperator Assign
+                BlockItem
+                    Statement
+                        Expression
+                            BinaryOperatorExpression
+                                Expression
+                                    Identifier "ret"
+                                Expression
+                                    CallExpression
+                                        Expression
+                                            Identifier "proc_dointvec_minmax"
+                                        Expression
+                                            UnaryOperatorExpression
+                                                UnaryOperator Address
+                                                Expression
+                                                    Identifier "new_table"
+                                        Expression
+                                            Identifier "write"
+                                        Expression
+                                            Identifier "buffer"
+                                        Expression
+                                            Identifier "lenp"
+                                        Expression
+                                            Identifier "ppos"
+                                BinaryOperator Assign
+                BlockItem
+                    Statement
+                        IfStatement
+                            Expression
+                                BinaryOperatorExpression
+                                    Expression
+                                        Identifier "ret"
+                                    Expression
+                                        UnaryOperatorExpression
+                                            UnaryOperator Negate
+                                            Expression
+                                                Identifier "write"
+                                    BinaryOperator LogicalOr
+                            Statement Return
+                                Expression
+                                    Identifier "ret"
+                BlockItem
+                    Statement
+                        Expression
+                            CallExpression
+                                Expression
+                                    Identifier "mutex_lock"
+                                Expression
+                                    UnaryOperatorExpression
+                                        UnaryOperator Address
+                                        Expression
+                                            Identifier "callchain_mutex"
+                BlockItem
+                    Statement
+                        IfStatement
+                            Expression
+                                CallExpression
+                                    Expression
+                                        Identifier "atomic_read"
+                                    Expression
+                                        UnaryOperatorExpression
+                                            UnaryOperator Address
+                                            Expression
+                                                Identifier "nr_callchain_events"
+                            Statement
+                                Expression
+                                    BinaryOperatorExpression
+                                        Expression
+                                            Identifier "ret"
+                                        Expression
+                                            UnaryOperatorExpression
+                                                UnaryOperator Minus
+                                                Expression
+                                                    Constant
+                                                        Integer "16"
+                                                            IntegerBase Decimal
+                                                            IntegerSuffix false false
+                                                                IntegerSize Int
+                                        BinaryOperator Assign
+                            Statement
+                                Expression
+                                    BinaryOperatorExpression
+                                        Expression
+                                            UnaryOperatorExpression
+                                                UnaryOperator Indirection
+                                                Expression
+                                                    Identifier "value"
+                                        Expression
+                                            Identifier "new_value"
+                                        BinaryOperator Assign
+                BlockItem
+                    Statement
+                        Expression
+                            CallExpression
+                                Expression
+                                    Identifier "mutex_unlock"
+                                Expression
+                                    UnaryOperatorExpression
+                                        UnaryOperator Address
+                                        Expression
+                                            Identifier "callchain_mutex"
                 BlockItem
                     Statement Return
                         Expression
-                            UnaryOperatorExpression
-                                UnaryOperator Address
-                                Expression
-                                    Identifier "x"
+                            Identifier "ret"

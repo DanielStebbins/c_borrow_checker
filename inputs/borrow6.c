@@ -1,4 +1,4 @@
-foo(const int *c);
+void foo(const int *c);
 
 void main() {
     int x = 5;
