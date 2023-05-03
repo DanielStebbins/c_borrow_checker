@@ -18,6 +18,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         self.function_body = false;
 
         // Run the block.
+        let before_scope = self.scopes.clone();
         visit::visit_statement(self, statement, span);
 
         // Remove the block's scope layer.
@@ -30,26 +31,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 .keys()
                 .map(|k| k.to_string())
                 .collect();
-
-            // Control flow rules applied at the end of block to enfore strictness.
-            for name in lost {
-                let id = Id {
-                    name: name,
-                    scope: scope,
-                };
-                let const_ids = self.id_to_var(&id).const_refs.clone();
-                for ref_id in const_ids.iter() {
-                    if let VarType::ConstRef(points_to) = &mut self.id_to_mut_var(ref_id).var_type {
-                        points_to.remove(&id);
-                    }
-                }
-                let mut_ids = self.id_to_var(&id).mut_refs.clone();
-                for ref_id in mut_ids.iter() {
-                    if let VarType::MutRef(points_to) = &mut self.id_to_mut_var(ref_id).var_type {
-                        points_to.remove(&id);
-                    }
-                }
-            }
+            self.merge_scopes(&before_scope);
             self.scopes.pop();
         }
     }
@@ -255,10 +237,14 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                                 var.mut_refs.clear();
                             }
                         }
+                    } else {
+                        // usefull for *p (dereferencing).
+                        self.visit_unary_operator_expression(&uo.node, &uo.span);
                     }
                 }
                 _ => {
                     // If not a reference, try to set as not owner. Won't do anything if it isn't an owner type.
+                    self.visit_expression(&argument.node, &argument.span);
                     self.set_expression_is_valid(argument, false, span);
                 }
             }
@@ -297,7 +283,9 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
             .push(member_expression.identifier.node.name.clone());
 
         if self.member_count > 0 || !self.mute_member_expression {
-            self.announce_no_ownership(self.member_identifier_pieces.join("."), span);
+            let partial_name = self.member_identifier_pieces.join(".");
+            self.announce_no_ownership(partial_name.clone(), span);
+            self.announce_invalid_reference(partial_name, span);
         }
         if self.member_count == 0 {
             self.member_identifier = self.member_identifier_pieces.join(".");
@@ -312,34 +300,37 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         uoe: &'ast UnaryOperatorExpression,
         span: &'ast span::Span,
     ) {
-        self.dereference_name.clear();
         match &uoe.operator.node {
-            UnaryOperator::Indirection => match &uoe.operand.node {
-                Expression::Identifier(id) => {
-                    let var = self.name_to_var(&id.node.name);
-                    match &var.var_type {
-                        VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
-                            let pointed_to = points_to.iter().next().unwrap();
-                            self.dereference_name = pointed_to.name.clone();
+            UnaryOperator::Indirection => {
+                self.dereference_name.clear();
+                match &uoe.operand.node {
+                    Expression::Identifier(id) => {
+                        self.visit_identifier(&id.node, &id.span);
+                        let var = self.name_to_var(&id.node.name);
+                        match &var.var_type {
+                            VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
+                                let pointed_to = points_to.iter().next().unwrap();
+                                self.dereference_name = pointed_to.name.clone();
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                }
-                Expression::Member(member_expression) => {
-                    let member_pieces_backup = self.member_identifier_pieces.clone();
-                    self.get_member_expression_identifier(member_expression);
-                    let var = self.name_to_var(&self.member_identifier.clone());
-                    match &var.var_type {
-                        VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
-                            let pointed_to = points_to.iter().next().unwrap();
-                            self.dereference_name = pointed_to.name.clone();
+                    Expression::Member(member_expression) => {
+                        let member_pieces_backup = self.member_identifier_pieces.clone();
+                        self.get_member_expression_identifier(member_expression);
+                        let var = self.name_to_var(&self.member_identifier.clone());
+                        match &var.var_type {
+                            VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
+                                let pointed_to = points_to.iter().next().unwrap();
+                                self.dereference_name = pointed_to.name.clone();
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                        self.member_identifier_pieces = member_pieces_backup;
                     }
-                    self.member_identifier_pieces = member_pieces_backup;
+                    _ => visit::visit_expression(self, &uoe.operand.node, &uoe.operand.span),
                 }
-                _ => visit::visit_expression(self, &uoe.operand.node, &uoe.operand.span),
-            },
+            }
             _ => visit::visit_unary_operator_expression(self, uoe, span),
         }
         // If this dereference is part of a member expression, add the result to the member expression name.
@@ -360,6 +351,8 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         );
         if let Some(ref else_statement) = if_statement.else_statement {
             let then_scopes = self.scopes.clone();
+
+            // Runs the else block as if the if block has not yet been run.
             self.scopes = temp;
             self.visit_statement(&else_statement.node, &else_statement.span);
             self.merge_scopes(&then_scopes);

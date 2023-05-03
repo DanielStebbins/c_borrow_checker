@@ -18,6 +18,8 @@ typedef int randomWord;
 
 int x = 5;
 
+void foo(Owner o);
+
 void main(const Owner *p1, int *p2)
 {
     randomWord random = 5;
@@ -25,6 +27,7 @@ void main(const Owner *p1, int *p2)
     int z = 5;
     test.testOwner.mutRef = &z;         // Creates variables for previously unknown names test.testOwner and test.testOwner.mutRef.
     Owner testKill = test.testOwner;    // kills test.testOwner.
+    Owner testError = test.testOwner;
     struct Test newTest;
     test = newTest;                     // makes live test and any owner-type members of test.
 
@@ -36,7 +39,7 @@ void main(const Owner *p1, int *p2)
     oldOwner = x;                   // lives oldOwner, kills x.
     oldOwner.value = 3;             // oldOwner is now alive.
     int y = oldOwner.value;         // no effect, since oldOwner.value is a copy type.
-    printf("%d\n", oldOwner);
+    foo(oldOwner);                  // Kills oldOwner.
     oldOwner = newOwner;            // makes live oldOwner and any owner-type members of oldOwner.
     return 0;
 }

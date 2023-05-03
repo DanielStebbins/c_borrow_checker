@@ -23,15 +23,12 @@ Limitations:
     - Ellipses functions like printf(fnoojefo, ...); assume strictness (&x treated as mut, x treated as owner).
     - No x->y, use (*x).y instead.
     - Multiple function parameters of the same name that are pointers to struct types might collide on the assumed global they are pointing to.
+    - Does not handle arrays.
 */
 
 /*
 TODO:
-    - Support += (AssignPlus) and other shorthand.
-    - Count . and -> separately.
-    - Clean the messy global scope.
     - Return error.
-    - Cannot move out of index of array.
     - Functions make mut / const pointers and take ownership based on signature.
     - reference assignment errors / not errors, also function calls.
     - &struct.member borrows whole struct.
@@ -58,17 +55,17 @@ use lang_c::visit::*;
 use std::io::Write;
 
 fn main() {
-    let file_path = "inputs\\kernel0.c";
+    let file_path = "inputs\\lifetime3.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
     let mut ownership_checker = BorrowChecker::new(
-        vec!["perf_event_max_stack_handler".to_string()],
+        vec!["foo".to_string()],
         &parse.source,
         PrintType::Reference,
-        PrintType::Ownership,
+        PrintType::Reference,
     );
 
     // Running the checker.

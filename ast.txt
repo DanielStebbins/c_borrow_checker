@@ -1,92 +1,13 @@
 TranslationUnit
     ExternalDeclaration
-        Declaration
-            DeclarationSpecifier
-                TypeSpecifier
-                    StructType
-                        StructKind Struct
-                        Identifier "ctl_table"
-                        StructDeclaration
-                            StructField
-                                SpecifierQualifier
-                                    TypeSpecifier Int
-                                StructDeclarator
-                                    Declarator
-                                        DeclaratorKind
-                                            Identifier "data"
-                                        DerivedDeclarator Pointer
-    ExternalDeclaration
-        Declaration
-            DeclarationSpecifier
-                StorageClassSpecifier Typedef
-            DeclarationSpecifier
-                TypeSpecifier
-                    StructType
-                        StructKind Struct
-                        Identifier "loff"
-            InitDeclarator
-                Declarator
-                    DeclaratorKind
-                        Identifier "loff_t"
-    ExternalDeclaration
-        Declaration
-            DeclarationSpecifier
-                StorageClassSpecifier Typedef
-            DeclarationSpecifier
-                TypeSpecifier Int
-            InitDeclarator
-                Declarator
-                    DeclaratorKind
-                        Identifier "size_t"
-    ExternalDeclaration
         FunctionDefinition
             DeclarationSpecifier
                 TypeSpecifier Int
             Declarator
                 DeclaratorKind
-                    Identifier "perf_event_max_stack_handler"
-                DerivedDeclarator
-                    FunctionDeclarator
-                        ParameterDeclaration
-                            DeclarationSpecifier
-                                TypeSpecifier
-                                    StructType
-                                        StructKind Struct
-                                        Identifier "ctl_table"
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "table"
-                                DerivedDeclarator Pointer
-                        ParameterDeclaration
-                            DeclarationSpecifier
-                                TypeSpecifier Int
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "write"
-                        ParameterDeclaration
-                            DeclarationSpecifier
-                                TypeSpecifier Void
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "buffer"
-                                DerivedDeclarator Pointer
-                        ParameterDeclaration
-                            DeclarationSpecifier
-                                TypeSpecifier TypedefName
-                                    Identifier "size_t"
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "lenp"
-                                DerivedDeclarator Pointer
-                        ParameterDeclaration
-                            DeclarationSpecifier
-                                TypeSpecifier TypedefName
-                                    Identifier "loff_t"
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "ppos"
-                                DerivedDeclarator Pointer
-                        Ellipsis None
+                    Identifier "foo"
+                DerivedDeclarator Pointer
+                DerivedDeclarator KRFunction
             Statement Compound
                 BlockItem
                     Declaration
@@ -95,166 +16,18 @@ TranslationUnit
                         InitDeclarator
                             Declarator
                                 DeclaratorKind
-                                    Identifier "value"
-                                DerivedDeclarator Pointer
+                                    Identifier "x"
                             Initializer
                                 Expression
-                                    MemberExpression
-                                        MemberOperator Direct
-                                        Expression
-                                            UnaryOperatorExpression
-                                                UnaryOperator Indirection
-                                                Expression
-                                                    Identifier "table"
-                                        Identifier "data"
-                BlockItem
-                    Declaration
-                        DeclarationSpecifier
-                            TypeSpecifier Int
-                        InitDeclarator
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "new_value"
-                            Initializer
-                                Expression
-                                    UnaryOperatorExpression
-                                        UnaryOperator Indirection
-                                        Expression
-                                            Identifier "value"
-                        InitDeclarator
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "ret"
-                BlockItem
-                    Declaration
-                        DeclarationSpecifier
-                            TypeSpecifier
-                                StructType
-                                    StructKind Struct
-                                    Identifier "ctl_table"
-                        InitDeclarator
-                            Declarator
-                                DeclaratorKind
-                                    Identifier "new_table"
-                            Initializer
-                                Expression
-                                    UnaryOperatorExpression
-                                        UnaryOperator Indirection
-                                        Expression
-                                            Identifier "table"
-                BlockItem
-                    Statement
-                        Expression
-                            BinaryOperatorExpression
-                                Expression
-                                    MemberExpression
-                                        MemberOperator Direct
-                                        Expression
-                                            Identifier "new_table"
-                                        Identifier "data"
-                                Expression
-                                    UnaryOperatorExpression
-                                        UnaryOperator Address
-                                        Expression
-                                            Identifier "new_value"
-                                BinaryOperator Assign
-                BlockItem
-                    Statement
-                        Expression
-                            BinaryOperatorExpression
-                                Expression
-                                    Identifier "ret"
-                                Expression
-                                    CallExpression
-                                        Expression
-                                            Identifier "proc_dointvec_minmax"
-                                        Expression
-                                            UnaryOperatorExpression
-                                                UnaryOperator Address
-                                                Expression
-                                                    Identifier "new_table"
-                                        Expression
-                                            Identifier "write"
-                                        Expression
-                                            Identifier "buffer"
-                                        Expression
-                                            Identifier "lenp"
-                                        Expression
-                                            Identifier "ppos"
-                                BinaryOperator Assign
-                BlockItem
-                    Statement
-                        IfStatement
-                            Expression
-                                BinaryOperatorExpression
-                                    Expression
-                                        Identifier "ret"
-                                    Expression
-                                        UnaryOperatorExpression
-                                            UnaryOperator Negate
-                                            Expression
-                                                Identifier "write"
-                                    BinaryOperator LogicalOr
-                            Statement Return
-                                Expression
-                                    Identifier "ret"
-                BlockItem
-                    Statement
-                        Expression
-                            CallExpression
-                                Expression
-                                    Identifier "mutex_lock"
-                                Expression
-                                    UnaryOperatorExpression
-                                        UnaryOperator Address
-                                        Expression
-                                            Identifier "callchain_mutex"
-                BlockItem
-                    Statement
-                        IfStatement
-                            Expression
-                                CallExpression
-                                    Expression
-                                        Identifier "atomic_read"
-                                    Expression
-                                        UnaryOperatorExpression
-                                            UnaryOperator Address
-                                            Expression
-                                                Identifier "nr_callchain_events"
-                            Statement
-                                Expression
-                                    BinaryOperatorExpression
-                                        Expression
-                                            Identifier "ret"
-                                        Expression
-                                            UnaryOperatorExpression
-                                                UnaryOperator Minus
-                                                Expression
-                                                    Identifier "EBUSY"
-                                        BinaryOperator Assign
-                            Statement
-                                Expression
-                                    BinaryOperatorExpression
-                                        Expression
-                                            UnaryOperatorExpression
-                                                UnaryOperator Indirection
-                                                Expression
-                                                    Identifier "value"
-                                        Expression
-                                            Identifier "new_value"
-                                        BinaryOperator Assign
-                BlockItem
-                    Statement
-                        Expression
-                            CallExpression
-                                Expression
-                                    Identifier "mutex_unlock"
-                                Expression
-                                    UnaryOperatorExpression
-                                        UnaryOperator Address
-                                        Expression
-                                            Identifier "callchain_mutex"
+                                    Constant
+                                        Integer "5"
+                                            IntegerBase Decimal
+                                            IntegerSuffix false false
+                                                IntegerSize Int
                 BlockItem
                     Statement Return
                         Expression
-                            Identifier "ret"
+                            UnaryOperatorExpression
+                                UnaryOperator Address
+                                Expression
+                                    Identifier "x"

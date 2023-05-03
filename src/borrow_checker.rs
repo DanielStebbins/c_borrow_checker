@@ -52,15 +52,11 @@ impl<'a> BorrowChecker<'a> {
         set_prints: PrintType,
         event_prints: PrintType,
     ) -> Self {
-        let unknown_variable = Variable::new("?".to_string(), 0, VarType::Copy);
-        let mut global_scope = HashMap::new();
-        global_scope.insert("?".to_string(), unknown_variable);
-
         BorrowChecker {
             functions_to_check: to_check,
 
             src: source,
-            scopes: vec![global_scope],
+            scopes: vec![HashMap::new()],
 
             structs: HashMap::new(),
             functions: HashMap::new(),
@@ -101,7 +97,7 @@ impl<'a> BorrowChecker<'a> {
         return count;
     }
 
-    pub fn get_id(&mut self, name: &str) -> Id {
+    pub fn get_id(&self, name: &str) -> Id {
         return Id {
             name: name.to_string(),
             scope: self.get_scope_number(name),
@@ -113,7 +109,6 @@ impl<'a> BorrowChecker<'a> {
     }
 
     pub fn id_to_mut_var(&mut self, id: &Id) -> &mut Variable {
-        println!("id to mut var {}", id.name);
         return self.scopes[id.scope].get_mut(&id.name).unwrap();
     }
 
@@ -358,10 +353,6 @@ impl<'a> BorrowChecker<'a> {
             );
             function_parameters.push(parameter_type);
         }
-        println!(
-            "Added a new function '{function_name}' with parameters: {:?}",
-            function_parameters
-        );
         self.functions.insert(function_name, function_parameters);
     }
 
@@ -419,9 +410,9 @@ impl<'a> BorrowChecker<'a> {
         if (function_parameter || name.contains("."))
             && matches!(var_type, VarType::ConstRef(_) | VarType::MutRef(_))
         {
-            println!("Declare unknown global for {}", name);
             let mut unknown_name = "?".to_string();
             if !self.previous_struct_name.is_empty() {
+                // Points to a struct, so it is assumed to point to a unique global of that type.
                 unknown_name += &name;
                 let unknown_var_type = VarType::Owner(self.previous_struct_name.clone(), true);
                 self.scopes[0].insert(
@@ -429,6 +420,12 @@ impl<'a> BorrowChecker<'a> {
                     Variable::new(unknown_name.to_string(), 0, unknown_var_type.clone()),
                 );
                 self.declare_unknown_global(&unknown_name, unknown_var_type, false)
+            } else {
+                // Does not point to a struct, so a shared global copy type is used.
+                self.scopes[0].insert(
+                    "?".to_string(),
+                    Variable::new("?".to_string(), 0, VarType::Copy),
+                );
             }
             let unknown_id = self.get_id(&unknown_name);
 
@@ -601,38 +598,72 @@ impl<'a> BorrowChecker<'a> {
     // TODO: struct member names.
     pub fn add_reference(&mut self, lhs: String, expression: &Node<Expression>, _: &span::Span) {
         if let Expression::UnaryOperator(unary_expression) = &expression.node {
-            if let Expression::Identifier(operand) = &unary_expression.node.operand.node {
-                if unary_expression.node.operator.node == UnaryOperator::Address {
-                    let var_id = self.get_id(&operand.node.name);
-                    let ref_id = self.get_id(&lhs);
+            if unary_expression.node.operator.node == UnaryOperator::Address {
+                match &unary_expression.node.operand.node {
+                    Expression::Identifier(operand) => {
+                        let var_id = self.get_id(&operand.node.name);
+                        let ref_id = self.get_id(&lhs);
 
-                    match &self.id_to_var(&ref_id).var_type {
-                        VarType::ConstRef(_) => {
-                            self.clear_points_to(&ref_id);
-                            self.add_const_ref(&var_id, &ref_id)
+                        match &self.id_to_var(&ref_id).var_type {
+                            VarType::ConstRef(_) => {
+                                self.clear_points_to(&ref_id);
+                                self.add_const_ref(&var_id, &ref_id)
+                            }
+                            VarType::MutRef(_) => {
+                                self.clear_points_to(&ref_id);
+                                self.add_mut_ref(&var_id, &ref_id)
+                            }
+                            _ => {}
                         }
-                        VarType::MutRef(_) => {
-                            self.clear_points_to(&ref_id);
-                            self.add_mut_ref(&var_id, &ref_id)
-                        }
-                        _ => {}
-                    }
 
-                    match &mut self.id_to_mut_var(&ref_id).var_type {
-                        VarType::ConstRef(points_to) => {
-                            points_to.insert(var_id.clone());
+                        match &mut self.id_to_mut_var(&ref_id).var_type {
+                            VarType::ConstRef(points_to) => {
+                                points_to.insert(var_id.clone());
+                            }
+                            VarType::MutRef(points_to) => {
+                                points_to.insert(var_id.clone());
+                            }
+                            _ => {}
                         }
-                        VarType::MutRef(points_to) => {
-                            points_to.insert(var_id.clone());
-                        }
-                        _ => {}
                     }
+                    Expression::Member(operand) => {
+                        self.get_member_expression_identifier(operand);
+
+                        // Borrowing any piece of a struct borrows the entire struct.
+                        let parent_name =
+                            &self.member_identifier[0..self.member_identifier.find(".").unwrap()];
+                        let var_id = self.get_id(parent_name);
+                        let ref_id = self.get_id(&lhs);
+
+                        match &self.id_to_var(&ref_id).var_type {
+                            VarType::ConstRef(_) => {
+                                self.clear_points_to(&ref_id);
+                                self.add_const_ref(&var_id, &ref_id)
+                            }
+                            VarType::MutRef(_) => {
+                                self.clear_points_to(&ref_id);
+                                self.add_mut_ref(&var_id, &ref_id)
+                            }
+                            _ => {}
+                        }
+
+                        match &mut self.id_to_mut_var(&ref_id).var_type {
+                            VarType::ConstRef(points_to) => {
+                                points_to.insert(var_id.clone());
+                            }
+                            VarType::MutRef(points_to) => {
+                                points_to.insert(var_id.clone());
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
 
-    pub fn announce_invalid_reference(&mut self, name: String, &span: &span::Span) {
+    pub fn announce_invalid_reference(&self, name: String, &span: &span::Span) {
         // Creates the middle terms of a struct member identifier in the parent's scope.
         let ref_id = self.get_id(&name);
         let reference = &self.id_to_var(&ref_id).var_type;
@@ -647,13 +678,21 @@ impl<'a> BorrowChecker<'a> {
                     );
                 } else {
                     for var_id in ids {
-                        let var = self.id_to_var(&var_id);
-                        if !var.const_refs.contains(&ref_id) {
+                        if var_id.scope >= self.scopes.len() {
                             let (location, _) = get_location_for_offset(self.src, span.start);
                             println!(
+                                "ERROR: using {}, a constant reference to out-of-scope variable {}, on line {}",
+                                ref_id.name, var_id.name, location.line
+                            );
+                        } else {
+                            let var = self.id_to_var(&var_id);
+                            if !var.const_refs.contains(&ref_id) {
+                                let (location, _) = get_location_for_offset(self.src, span.start);
+                                println!(
                                 "ERROR: using {}, an invalid constant reference to {}, on line {}",
                                 ref_id.name, var_id.name, location.line
                             );
+                            }
                         }
                     }
                 }
@@ -668,13 +707,21 @@ impl<'a> BorrowChecker<'a> {
                     );
                 } else {
                     for var_id in ids {
-                        let var = self.id_to_var(&var_id);
-                        if !var.mut_refs.contains(&ref_id) {
+                        if var_id.scope >= self.scopes.len() {
                             let (location, _) = get_location_for_offset(self.src, span.start);
                             println!(
+                                "ERROR: using {}, a mutable reference to out-of-scope variable {}, on line {}",
+                                ref_id.name, var_id.name, location.line
+                            );
+                        } else {
+                            let var = self.id_to_var(&var_id);
+                            if !var.mut_refs.contains(&ref_id) {
+                                let (location, _) = get_location_for_offset(self.src, span.start);
+                                println!(
                                 "ERROR: using {}, an invalid mutable reference to {}, on line {}",
                                 ref_id.name, var_id.name, location.line
                             );
+                            }
                         }
                     }
                 }
