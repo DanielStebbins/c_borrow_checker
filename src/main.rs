@@ -57,17 +57,17 @@ use lang_c::visit::*;
 use std::io::Write;
 
 fn main() {
-    let file_path = "inputs\\kernel0\\kernel0.c";
+    let file_path = "/home/danrstebb/linux/kernel/events/callchain.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
     let mut ownership_checker = BorrowChecker::new(
-        vec!["perf_event_max_stack_handler".to_string()],
+        vec!["main".to_string()],
         &parse.source,
         false,
-        PrintType::Reference,
+        PrintType::ErrorOnly,
         PrintType::ErrorOnly,
     );
 

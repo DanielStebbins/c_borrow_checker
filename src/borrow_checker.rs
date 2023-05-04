@@ -357,7 +357,6 @@ impl<'a> BorrowChecker<'a> {
             function_parameters.push(parameter_type);
         }
         self.functions.insert(function_name, function_parameters);
-        println!("{:?}", self.functions);
     }
 
     // Struct member delcarations use a different set of specifiers than regular declarations.
