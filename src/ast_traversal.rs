@@ -34,9 +34,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 &declarator.node.declarator.node,
                 &declaration.specifiers,
                 false,
-            )
-        }
-        for declarator in &declaration.declarators {
+            );
             self.visit_init_declarator(&declarator.node, &declarator.span);
         }
     }
