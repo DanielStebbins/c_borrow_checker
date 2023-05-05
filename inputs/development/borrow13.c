@@ -11,6 +11,6 @@ void main() {
 
     int y = 5;
     const int *cy = &y;
-    bar(&x);                    // makes a mutable reference, invalidating cy
+    bar(&y);                    // makes a mutable reference, invalidating cy
     foo(cy);                    // ERROR: using invalid pointer cy.
 }

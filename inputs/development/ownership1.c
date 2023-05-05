@@ -27,7 +27,7 @@ void main(const Owner *p1, int *p2)
     int z = 5;
     test.testOwner.mutRef = &z;         // Creates variables for previously unknown names test.testOwner and test.testOwner.mutRef.
     Owner testKill = test.testOwner;    // kills test.testOwner.
-    Owner testError = test.testOwner;
+    Owner testError = test.testOwner;   // ERROR: use of moved value test.testOwner
     struct Test newTest;
     test = newTest;                     // makes live test and any owner-type members of test.
 

@@ -156,7 +156,7 @@ impl<'a> BorrowChecker<'a> {
         let variable: &mut Variable = self.name_to_mut_var(&name);
         let var_type: VarType = variable.var_type.clone();
 
-        // Changing an variable's ownership invalidates all its references.
+        // Changing the ownership of a value invalidates all of its references.
         variable.const_refs.clear();
         variable.mut_refs.clear();
 
@@ -171,7 +171,7 @@ impl<'a> BorrowChecker<'a> {
             } else if !has_ownership {
                 if !had_ownership {
                     println!(
-                        "ERROR: Use of moved value '{}' used on line {}.",
+                        "ERROR: Use of moved value '{}' on line {}.",
                         name, location.line
                     );
                 } else {
@@ -512,7 +512,7 @@ impl<'a> BorrowChecker<'a> {
         if matches!(variable.var_type, VarType::Owner(_, false)) {
             let (location, _) = get_location_for_offset(self.src, span.start);
             println!(
-                "ERROR: Use of moved value '{}' used on line {}.",
+                "ERROR: Use of moved value '{}' on line {}.",
                 name, location.line
             );
         }
@@ -788,6 +788,20 @@ impl<'a> BorrowChecker<'a> {
                     self.get_member_expression_identifier(member_expression);
                 }
                 self.reference_assignment(lhs, self.member_identifier.clone(), span);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn announce_if_non_copy_behind_reference(&mut self, name: String, span: &span::Span) {
+        let dereferenced_var = self.name_to_var(&self.dereference_name.clone());
+        match dereferenced_var.var_type {
+            VarType::Owner(_, _) | VarType::MutRef(_) => {
+                let (location, _) = get_location_for_offset(self.src, span.start);
+                println!(
+                    "ERROR: Cannot move non-Copy type '{}' from behind a reference on line {}.",
+                    self.dereference_name, location.line
+                );
             }
             _ => {}
         }

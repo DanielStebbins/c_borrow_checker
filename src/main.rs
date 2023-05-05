@@ -15,17 +15,8 @@ Ranting:
 
 /*
 Limitations:
-    - To get line-by-line prints, each block (if, for, while, ...) must have {}
-    - No &&x, only &x are recognized as references because they are immeditately followed by an identifier.
-    - Ellipses functions like printf(fnoojefo, ...); assume strictness (&x treated as mut, x treated as owner).
-    - Multiple function parameters of the same name that are pointers to struct types might collide on the assumed global they are pointing to.
-    - Does not handle arrays.
-    - Does not check passing mismatched const/mut references to functions, as that does not effect the state of this function.
-
-    - Function prototypes must have names for their parameters.
-    - No x->y, use (*x).y instead.
     - void pointers assume pointing to Copy types, so they become &i32 when converting to Rust.
-    - Function return types are ignored, so all the Rust functions are unless their return values are needed.
+
     - Rust places extra restrictions on globals, so I passed them in as function parameters instead.
     - Some unused struct fields that would require additional copy-pasting have been omitted. These have no effect on the output.
     - Parser cannot parse <stdlib.h>, so tests with malloc and free are not possible.
@@ -47,17 +38,17 @@ use lang_c::visit::*;
 use std::io::Write;
 
 fn main() {
-    let file_path = "inputs\\kernel0\\round0.c";
+    let file_path = "inputs\\kernel1\\round0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
     let parse = result.expect("Parsing Error!\n");
 
     let mut ownership_checker = BorrowChecker::new(
-        vec!["perf_event_max_stack_handler".to_string()],
+        vec!["badblocks_set".to_string()],
         &parse.source,
-        true,
-        PrintType::Reference,
+        false,
+        PrintType::ErrorOnly,
         PrintType::ErrorOnly,
     );
 

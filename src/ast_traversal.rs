@@ -2,95 +2,11 @@ use crate::variable::*;
 use crate::BorrowChecker;
 use crate::PrintType;
 use lang_c::ast::*;
+use lang_c::loc;
 use lang_c::*;
 use std::collections::HashMap;
 
 impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
-    // Scope changes.
-    fn visit_statement(&mut self, statement: &'ast Statement, span: &'ast span::Span) {
-        // Add a new scope layer for this block.
-        if !self.function_body {
-            if let Statement::Compound(_) = statement {
-                self.scopes.push(HashMap::new());
-            }
-        }
-        self.function_body = false;
-
-        // Run the block.
-        let before_scope = self.scopes.clone();
-        visit::visit_statement(self, statement, span);
-
-        // Merge the scopes, then remove the block's scope layer.
-        if let Statement::Compound(_) = statement {
-            self.merge_scopes(&before_scope);
-            self.scopes.pop();
-        }
-    }
-
-    // Variable declarations.
-    fn visit_declaration(&mut self, declaration: &'ast Declaration, _: &'ast span::Span) {
-        for declarator in &declaration.declarators {
-            self.declare_variable(
-                &declarator.node.declarator.node,
-                &declaration.specifiers,
-                false,
-            );
-            self.visit_init_declarator(&declarator.node, &declarator.span);
-        }
-    }
-
-    // Assignments that happen directly after a declaration.
-    fn visit_init_declarator(
-        &mut self,
-        init_declarator: &'ast InitDeclarator,
-        span: &'ast span::Span,
-    ) {
-        // Declaring the LHS variable is done in visit_declaration.
-
-        // RHS
-        if let Some(ref initializer) = init_declarator.initializer {
-            match &initializer.node {
-                Initializer::Expression(expression) => {
-                    self.set_expression_ownership(&expression, false, span);
-                }
-                _ => visit::visit_initializer(self, &initializer.node, span),
-            }
-        }
-
-        // The LHS is potentially a new reference to the RHS.
-        if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
-            if let Some(ref initializer) = init_declarator.initializer {
-                if let Initializer::Expression(expression) = &initializer.node {
-                    self.add_reference(identifier.node.name.clone(), &expression, span);
-                }
-            }
-        }
-    }
-
-    // Assignments
-    fn visit_binary_operator_expression(
-        &mut self,
-        boe: &'ast ast::BinaryOperatorExpression,
-        span: &'ast span::Span,
-    ) {
-        if boe.operator.node != BinaryOperator::Assign {
-            visit::visit_binary_operator_expression(self, boe, span);
-        } else {
-            self.set_expression_ownership(&boe.rhs, false, span);
-            self.set_expression_ownership(&boe.lhs, true, span);
-            match &boe.lhs.node {
-                Expression::Identifier(name) => {
-                    self.add_reference(name.node.name.clone(), &boe.rhs, span);
-                }
-                Expression::Member(_) => {
-                    // member identifier is known from when it was set to valid in set_expression_is_valid.
-                    self.add_reference(self.member_identifier.clone(), &boe.rhs, span);
-                }
-                _ => {}
-            }
-        }
-    }
-
     // For things declared at the global scope (function prototypes, struct definitions, global variables).
     fn visit_external_declaration(
         &mut self,
@@ -185,6 +101,110 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
+    // Scope changes.
+    fn visit_statement(&mut self, statement: &'ast Statement, span: &'ast span::Span) {
+        // Add a new scope layer for this block.
+        if !self.function_body {
+            if let Statement::Compound(_) = statement {
+                self.scopes.push(HashMap::new());
+            }
+        }
+        self.function_body = false;
+
+        // Run the block.
+        let before_scope = self.scopes.clone();
+        visit::visit_statement(self, statement, span);
+
+        // Merge the scopes, then remove the block's scope layer.
+        if let Statement::Compound(_) = statement {
+            self.merge_scopes(&before_scope);
+            self.scopes.pop();
+        }
+    }
+
+    // If statements - different from loop scopes because the if and else blocks have to be treated equally.
+    fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
+        self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
+
+        let temp = self.scopes.clone();
+        self.visit_statement(
+            &if_statement.then_statement.node,
+            &if_statement.then_statement.span,
+        );
+        if let Some(ref else_statement) = if_statement.else_statement {
+            let then_scopes = self.scopes.clone();
+
+            // Runs the else block as if the if block has not yet been run.
+            self.scopes = temp;
+            self.visit_statement(&else_statement.node, &else_statement.span);
+            self.merge_scopes(&then_scopes);
+        }
+    }
+
+    // Variable declarations.
+    fn visit_declaration(&mut self, declaration: &'ast Declaration, _: &'ast span::Span) {
+        for declarator in &declaration.declarators {
+            self.declare_variable(
+                &declarator.node.declarator.node,
+                &declaration.specifiers,
+                false,
+            );
+            self.visit_init_declarator(&declarator.node, &declarator.span);
+        }
+    }
+
+    // Assignments that happen directly after a declaration.
+    fn visit_init_declarator(
+        &mut self,
+        init_declarator: &'ast InitDeclarator,
+        span: &'ast span::Span,
+    ) {
+        // Declaring the LHS variable is done in visit_declaration.
+
+        // RHS
+        if let Some(ref initializer) = init_declarator.initializer {
+            match &initializer.node {
+                Initializer::Expression(expression) => {
+                    self.set_expression_ownership(&expression, false, span);
+                }
+                _ => visit::visit_initializer(self, &initializer.node, span),
+            }
+        }
+
+        // The LHS is potentially a new reference to the RHS.
+        if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
+            if let Some(ref initializer) = init_declarator.initializer {
+                if let Initializer::Expression(expression) = &initializer.node {
+                    self.add_reference(identifier.node.name.clone(), &expression, span);
+                }
+            }
+        }
+    }
+
+    // Assignments
+    fn visit_binary_operator_expression(
+        &mut self,
+        boe: &'ast ast::BinaryOperatorExpression,
+        span: &'ast span::Span,
+    ) {
+        if boe.operator.node != BinaryOperator::Assign {
+            visit::visit_binary_operator_expression(self, boe, span);
+        } else {
+            self.set_expression_ownership(&boe.rhs, false, span);
+            self.set_expression_ownership(&boe.lhs, true, span);
+            match &boe.lhs.node {
+                Expression::Identifier(name) => {
+                    self.add_reference(name.node.name.clone(), &boe.rhs, span);
+                }
+                Expression::Member(_) => {
+                    // member identifier is known from when it was set to valid in set_expression_is_valid.
+                    self.add_reference(self.member_identifier.clone(), &boe.rhs, span);
+                }
+                _ => {}
+            }
+        }
+    }
+
     // Parameters passed to a function are declared in the function's scope.
     fn visit_parameter_declaration(
         &mut self,
@@ -238,10 +258,15 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                     } else {
                         // useful for *p (dereferencing).
                         self.visit_unary_operator_expression(&uo.node, &uo.span);
+                        self.announce_if_non_copy_behind_reference(
+                            self.dereference_name.clone(),
+                            &uo.span,
+                        );
                     }
                 }
                 _ => {
                     // If not a reference, try to set as not owner. Won't do anything if it isn't an Owner type.
+                    // Occassionally causes double error prints.
                     self.visit_expression(&argument.node, &argument.span);
                     self.set_expression_ownership(argument, false, span);
                 }
@@ -347,25 +372,6 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         if self.member_count > 0 {
             self.member_identifier_pieces
                 .push(self.dereference_name.clone());
-        }
-    }
-
-    // If statements - different from loop scopes because the if and else blocks have to be treated equally.
-    fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
-        self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
-
-        let temp = self.scopes.clone();
-        self.visit_statement(
-            &if_statement.then_statement.node,
-            &if_statement.then_statement.span,
-        );
-        if let Some(ref else_statement) = if_statement.else_statement {
-            let then_scopes = self.scopes.clone();
-
-            // Runs the else block as if the if block has not yet been run.
-            self.scopes = temp;
-            self.visit_statement(&else_statement.node, &else_statement.span);
-            self.merge_scopes(&then_scopes);
         }
     }
 
