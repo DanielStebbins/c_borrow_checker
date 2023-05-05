@@ -44,7 +44,7 @@ fn main() {
 
     let parse = result.expect("Parsing Error!\n");
 
-    let mut ownership_checker = BorrowChecker::new(
+    let mut borrow_checker = BorrowChecker::new(
         vec!["badblocks_set".to_string()],
         &parse.source,
         false,
@@ -53,7 +53,7 @@ fn main() {
     );
 
     // Running the checker.
-    ownership_checker.visit_translation_unit(&parse.unit);
+    borrow_checker.visit_translation_unit(&parse.unit);
     println!("\n\n"); // Spacing to make it easier to get images of the output.
 
     // Printing the abstract syntax tree to a file.
