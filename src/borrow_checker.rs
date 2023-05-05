@@ -17,7 +17,10 @@ pub struct BorrowChecker<'a> {
     // For the user to specify what functions the checks should run on.
     pub functions_to_check: Vec<String>,
 
+    // Needed for line numbers in prints.
     pub src: &'a str,
+
+    // Main variable for tracking the state of the input program.
     pub scopes: Vec<HashMap<String, Variable>>,
 
     // So the checker knows the types of struct members (need to know if they are copy types or not)
@@ -38,6 +41,7 @@ pub struct BorrowChecker<'a> {
     // Tracks the previous struct name seen, for when pointers to structs are declared as function parameters.
     pub previous_struct_name: String,
 
+    // The last variable name to be dereferenced (if *p->x, seeing *p stores x in this field).
     pub dereference_name: String,
 
     // Controls what kind of output is shown.
@@ -115,7 +119,7 @@ impl<'a> BorrowChecker<'a> {
         return self.scopes[id.scope].get_mut(&id.name).unwrap();
     }
 
-    // Assumes the variable is an owner type.
+    // Given a variable name, returns a reference to that variable's instance. Creates the variable if it hasn't been declared.
     pub fn name_to_var(&mut self, name: &str) -> &Variable {
         let count = self.get_scope_number(name);
         if !self.scopes[count].contains_key(name) {
@@ -123,7 +127,7 @@ impl<'a> BorrowChecker<'a> {
             // println!("Created new variable '{name}' of type {:?}", var_type);
             self.scopes[count].insert(
                 name.to_string(),
-                Variable::new(name.to_string(), 0, var_type.clone()),
+                Variable::new(name.to_string(), count, var_type.clone()),
             );
             self.declare_unknown_global(name, var_type, false)
         }
@@ -137,13 +141,14 @@ impl<'a> BorrowChecker<'a> {
             // println!("Created new variable '{name}' of type {:?}", var_type);
             self.scopes[count].insert(
                 name.to_string(),
-                Variable::new(name.to_string(), 0, var_type.clone()),
+                Variable::new(name.to_string(), count, var_type.clone()),
             );
             self.declare_unknown_global(name, var_type, false)
         }
         return self.scopes[count].get_mut(name).unwrap();
     }
 
+    // For when a variable is involved in an assignment or being passed to a function.
     pub fn set_ownership(&mut self, name: String, has_ownership: bool, span: &span::Span) {
         if name == "NULL" {
             return;
@@ -151,10 +156,12 @@ impl<'a> BorrowChecker<'a> {
         let variable: &mut Variable = self.name_to_mut_var(&name);
         let var_type: VarType = variable.var_type.clone();
 
+        // Changing an variable's ownership invalidates all its references.
+        variable.const_refs.clear();
+        variable.mut_refs.clear();
+
+        // If the variable is an Owner, additional checks to set its ownership and print error messages.
         if let VarType::Owner(type_name, had_ownership) = var_type {
-            // Changing an variable's ownership invalidates all its references.
-            variable.const_refs.clear();
-            variable.mut_refs.clear();
             variable.var_type = VarType::Owner(type_name, has_ownership);
 
             // Error / Debug prints.
@@ -176,19 +183,34 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    // For when an entire struct has its ownership changed.
     fn set_all_ownership(&mut self, name: String, has_ownership: bool, span: &span::Span) {
         self.set_ownership(name.clone(), has_ownership, span);
-        let period = name.clone() + ".";
-        let related: Vec<String> = self.scopes[self.get_scope_number(&name)]
+
+        // Moves ownership (and invalidates all pointers to) local struct relatives. (assigning to x invalidates x.y).
+        let member = name.clone() + ".";
+        let local_relatives: Vec<String> = self.scopes[self.get_scope_number(&name)]
             .keys()
-            .filter(|k| k.starts_with(&period))
+            .filter(|k| k.starts_with(&member))
             .map(|k| k.to_string())
             .collect();
-        for member in related {
-            self.set_ownership(member, has_ownership, span);
+        for relative in local_relatives {
+            self.set_ownership(relative, has_ownership, span);
+        }
+
+        // Does the same, but for the global unknown relatives. (assigning to x invalidates ?x.ptr).
+        let unknown_member = "?".to_string() + &name.clone() + ".";
+        let global_unknown_relatives: Vec<String> = self.scopes[0]
+            .keys()
+            .filter(|k| k.starts_with(&unknown_member))
+            .map(|k| k.to_string())
+            .collect();
+        for relative in global_unknown_relatives {
+            self.set_ownership(relative, has_ownership, span);
         }
     }
 
+    // Based on the DeclarationSpecifiers present at the variable's declaration, determine what its VarType should be.
     pub fn get_var_type(
         &mut self,
         declarator: &Declarator,
@@ -257,6 +279,7 @@ impl<'a> BorrowChecker<'a> {
         return var_type;
     }
 
+    // Most struct members are not explicitly declared. We infer their VarTypes from the types of their parent struct's fields.
     pub fn get_member_var_type(&mut self, name: &str) -> VarType {
         if !name.contains(".") {
             println!("ISSUE: Unrecognized name '{name}' was not a struct member!");
@@ -279,6 +302,7 @@ impl<'a> BorrowChecker<'a> {
         return VarType::Copy;
     }
 
+    // When a struct definition is seen, add its mapping from fields to VarTypes to the structs map.
     pub fn add_struct(&mut self, declaration: &Node<Declaration>) {
         let mut struct_names = HashSet::new();
         let mut struct_members: HashMap<String, VarType> = HashMap::new();
@@ -359,7 +383,7 @@ impl<'a> BorrowChecker<'a> {
         self.functions.insert(function_name, function_parameters);
     }
 
-    // Struct member delcarations use a different set of specifiers than regular declarations.
+    // Conversion function because struct member delcarations use a different set of specifiers than regular declarations.
     pub fn struct_specifier_to_declaration_specifier(
         &self,
         specifiers: &Vec<Node<SpecifierQualifier>>,
@@ -402,7 +426,7 @@ impl<'a> BorrowChecker<'a> {
         self.declare_unknown_global(&name, var_type, function_parameter);
     }
 
-    // Adds a new global for a function parameter pointer to point to (needed for pointers to structs).
+    // Adds a new global for a function parameter pointer or struct member pointer to point to (what it really points to is unknown).
     pub fn declare_unknown_global(
         &mut self,
         name: &str,
@@ -457,13 +481,14 @@ impl<'a> BorrowChecker<'a> {
 
     // Compiles the name of the current struct member name "x.y.z" into self.member_identifier.
     pub fn get_member_expression_identifier(&mut self, member_expression: &Node<MemberExpression>) {
+        // mute_member_expression stops duplicate error messages for the completed name.
         self.mute_member_expression = true;
         self.visit_member_expression(&member_expression.node, &member_expression.span);
         self.mute_member_expression = false;
     }
 
-    // Given an expression, sets it to invalid if it is an uncopiable variable.
-    pub fn set_expression_is_valid(
+    // Given an expression, sets its ownership if it's an owner type.
+    pub fn set_expression_ownership(
         &mut self,
         expression: &Node<Expression>,
         is_valid: bool,
@@ -481,8 +506,8 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    // Prints the error message for an owner type being used without ownership.
     pub fn announce_no_ownership(&mut self, name: String, &span: &span::Span) {
-        // Creates the middle terms of a struct member identifier in the parent's scope.
         let variable = self.name_to_var(&name);
         if matches!(variable.var_type, VarType::Owner(_, false)) {
             let (location, _) = get_location_for_offset(self.src, span.start);
@@ -493,6 +518,7 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    // Control flow logic, merging all possibilities while being as strict as possible.
     pub fn merge_scopes(&mut self, other_scopes: &Vec<HashMap<String, Variable>>) {
         for i in 0..self.scopes.len() {
             let s = &mut self.scopes[i];
@@ -503,15 +529,18 @@ impl<'a> BorrowChecker<'a> {
                     variable.const_refs.extend(v.const_refs.clone());
                     variable.mut_refs.extend(v.mut_refs.clone());
 
-                    // Type-specific merging (ownership rounded down, points_to rounded up).
+                    // Type-specific merging.
                     match &v.var_type {
                         VarType::Owner(type_name, o1) => {
                             if let VarType::Owner(_, o2) = variable.var_type {
+                                // No ownership dominates ownership
                                 variable.var_type = VarType::Owner(type_name.clone(), *o1 && o2);
                             }
                         }
                         VarType::ConstRef(points_to1) | VarType::MutRef(points_to1) => {
                             if let VarType::ConstRef(points_to2) = &mut variable.var_type {
+                                // Might be pointing to anything it was pointing to in either scope.
+                                // Pointing to an out-of-scope variable handled separately.
                                 points_to2.extend(points_to1.clone());
                             }
                         }
@@ -525,6 +554,7 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    // Prints the ownership set.
     pub fn print_ownership(&self, &span: &span::Span) {
         let (location, _) = get_location_for_offset(self.src, span.start);
         let out = format!(
@@ -552,9 +582,9 @@ impl<'a> BorrowChecker<'a> {
     }
 }
 
-// Reference Functions.
+// Functions for the borrowing (reference) rules.
 impl<'a> BorrowChecker<'a> {
-    // Unlink a ref from all the variables it points to.
+    // Remove a reference from all the variables it points to.
     pub fn clear_points_to(&mut self, id: &Id) {
         match &self.id_to_var(id).var_type {
             VarType::ConstRef(points_to) => {
@@ -726,33 +756,54 @@ impl<'a> BorrowChecker<'a> {
     // Given a LHS variable name and a RHS expression, computes all reference-related changes (p=&x, p2=p1, etc).
     pub fn add_reference(&mut self, lhs: String, rhs: &Node<Expression>, span: &span::Span) {
         match &rhs.node {
-            Expression::UnaryOperator(unary_expression) => {
-                if unary_expression.node.operator.node == UnaryOperator::Address {
-                    self.reference_from_address(lhs, &unary_expression.node.operand.node);
+            Expression::UnaryOperator(uoe) => match uoe.node.operator.node {
+                UnaryOperator::Address => {
+                    self.reference_from_address(lhs, &uoe.node.operand.node);
                 }
-            }
+                UnaryOperator::Indirection => {
+                    // For preventing non-copy moves from behind references.
+                    self.visit_unary_operator_expression(&uoe.node, &uoe.span);
+                    let dereferenced_var = self.name_to_var(&self.dereference_name.clone());
+                    match dereferenced_var.var_type {
+                        VarType::Copy | VarType::ConstRef(_) => {
+                            self.reference_assignment(lhs, self.dereference_name.clone(), span);
+                        }
+                        _ => {
+                            let (location, _) = get_location_for_offset(self.src, span.start);
+                            println!(
+                                "ERROR: Cannot move non-Copy type '{}' from behind a reference on line {}.",
+                                self.dereference_name, location.line
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            },
             Expression::Identifier(rhs_identifier) => {
                 self.reference_assignment(lhs, rhs_identifier.node.name.clone(), span);
             }
             Expression::Member(member_expression) => {
-                self.get_member_expression_identifier(member_expression);
+                // If statement stops redundant error prints.
+                if self.member_identifier.is_empty() {
+                    self.get_member_expression_identifier(member_expression);
+                }
                 self.reference_assignment(lhs, self.member_identifier.clone(), span);
             }
             _ => {}
         }
     }
 
-    pub fn announce_invalid_reference(&self, name: String, &span: &span::Span) {
-        // Creates the middle terms of a struct member identifier in the parent's scope.
+    // Error messages for the use of a reference who's pointed-to variable does not recognize the reference (reference since invalidated).
+    pub fn announce_invalid_reference(&mut self, name: String, &span: &span::Span) {
         let ref_id = self.get_id(&name);
-        let reference = &self.id_to_var(&ref_id).var_type;
+        let reference = &self.name_to_var(&name).var_type;
         match reference {
             VarType::ConstRef(points_to) => {
                 let ids = points_to.clone();
                 if ids.is_empty() {
                     let (location, _) = get_location_for_offset(self.src, span.start);
                     println!(
-                        "ERROR: using {}, a constant reference to no value, on line {}",
+                        "ERROR: using '{}', a constant reference to no value, on line '{}'",
                         ref_id.name, location.line
                     );
                 } else {
@@ -760,7 +811,7 @@ impl<'a> BorrowChecker<'a> {
                         if var_id.scope >= self.scopes.len() {
                             let (location, _) = get_location_for_offset(self.src, span.start);
                             println!(
-                                "ERROR: using {}, a constant reference to out-of-scope variable {}, on line {}",
+                                "ERROR: using '{}', a constant reference to out-of-scope variable '{}', on line {}",
                                 ref_id.name, var_id.name, location.line
                             );
                         } else {
@@ -768,7 +819,7 @@ impl<'a> BorrowChecker<'a> {
                             if !var.const_refs.contains(&ref_id) {
                                 let (location, _) = get_location_for_offset(self.src, span.start);
                                 println!(
-                                "ERROR: using {}, an invalid constant reference to {}, on line {}",
+                                "ERROR: using '{}', an invalid constant reference to '{}', on line {}",
                                 ref_id.name, var_id.name, location.line
                             );
                             }
@@ -781,7 +832,7 @@ impl<'a> BorrowChecker<'a> {
                 if ids.is_empty() {
                     let (location, _) = get_location_for_offset(self.src, span.start);
                     println!(
-                        "ERROR: using {}, a mutable reference to no value, on line {}",
+                        "ERROR: using '{}', a mutable reference to no value, on line {}",
                         ref_id.name, location.line
                     );
                 } else {
@@ -789,7 +840,7 @@ impl<'a> BorrowChecker<'a> {
                         if var_id.scope >= self.scopes.len() {
                             let (location, _) = get_location_for_offset(self.src, span.start);
                             println!(
-                                "ERROR: using {}, a mutable reference to out-of-scope variable {}, on line {}",
+                                "ERROR: using '{}', a mutable reference to out-of-scope variable '{}', on line {}",
                                 ref_id.name, var_id.name, location.line
                             );
                         } else {
@@ -797,7 +848,7 @@ impl<'a> BorrowChecker<'a> {
                             if !var.mut_refs.contains(&ref_id) {
                                 let (location, _) = get_location_for_offset(self.src, span.start);
                                 println!(
-                                "ERROR: using {}, an invalid mutable reference to {}, on line {}",
+                                "ERROR: using '{}', an invalid mutable reference to '{}', on line {}",
                                 ref_id.name, var_id.name, location.line
                             );
                             }
@@ -809,6 +860,7 @@ impl<'a> BorrowChecker<'a> {
         }
     }
 
+    // Prints the set of references. {const ref},{mut ref}'->variable. Mutable references have the '
     pub fn print_references(&self, &span: &span::Span) {
         let (location, _) = get_location_for_offset(self.src, span.start);
         let out = format!(

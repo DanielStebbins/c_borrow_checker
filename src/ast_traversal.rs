@@ -4,10 +4,9 @@ use crate::PrintType;
 use lang_c::ast::*;
 use lang_c::*;
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
-    // Triggers scope changes.
+    // Scope changes.
     fn visit_statement(&mut self, statement: &'ast Statement, span: &'ast span::Span) {
         // Add a new scope layer for this block.
         if !self.function_body {
@@ -28,8 +27,8 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // =============================================== Assignments (make_live) ===============================================
-    fn visit_declaration(&mut self, declaration: &'ast Declaration, span: &'ast span::Span) {
+    // Variable declarations.
+    fn visit_declaration(&mut self, declaration: &'ast Declaration, _: &'ast span::Span) {
         for declarator in &declaration.declarators {
             self.declare_variable(
                 &declarator.node.declarator.node,
@@ -37,32 +36,31 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 false,
             )
         }
-        // Stolen from visit::visit_declaration, edited to stop visiting specifiers (it was trying to create variables for type identifiers.)
         for declarator in &declaration.declarators {
             self.visit_init_declarator(&declarator.node, &declarator.span);
         }
     }
 
-    // Make identifiers valid if they are on the LHS of an assignment or are declared.
+    // Assignments that happen directly after a declaration.
     fn visit_init_declarator(
         &mut self,
         init_declarator: &'ast InitDeclarator,
         span: &'ast span::Span,
     ) {
         // Declaring the LHS variable is done in visit_declaration.
+
         // RHS
         if let Some(ref initializer) = init_declarator.initializer {
             match &initializer.node {
                 Initializer::Expression(expression) => {
-                    self.set_expression_is_valid(&expression, false, span);
+                    self.set_expression_ownership(&expression, false, span);
                 }
                 _ => visit::visit_initializer(self, &initializer.node, span),
             }
         }
 
-        // LHS
+        // The LHS is potentially a new reference to the RHS.
         if let DeclaratorKind::Identifier(identifier) = &init_declarator.declarator.node.kind.node {
-            // Possibly adding a reference to the RHS, which requires the LHS's identifier.
             if let Some(ref initializer) = init_declarator.initializer {
                 if let Initializer::Expression(expression) = &initializer.node {
                     self.add_reference(identifier.node.name.clone(), &expression, span);
@@ -71,6 +69,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
+    // Assignments
     fn visit_binary_operator_expression(
         &mut self,
         boe: &'ast ast::BinaryOperatorExpression,
@@ -79,8 +78,8 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         if boe.operator.node != BinaryOperator::Assign {
             visit::visit_binary_operator_expression(self, boe, span);
         } else {
-            self.set_expression_is_valid(&boe.rhs, false, span);
-            self.set_expression_is_valid(&boe.lhs, true, span);
+            self.set_expression_ownership(&boe.rhs, false, span);
+            self.set_expression_ownership(&boe.lhs, true, span);
             match &boe.lhs.node {
                 Expression::Identifier(name) => {
                     self.add_reference(name.node.name.clone(), &boe.rhs, span);
@@ -94,12 +93,11 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // For things declared at the global scope. Currently only visits function defintions.
-    // Should visit other globals but w/o applying borrow checker rules to them.
+    // For things declared at the global scope (function prototypes, struct definitions, global variables).
     fn visit_external_declaration(
         &mut self,
         external_declaration: &'ast ExternalDeclaration,
-        span: &'ast span::Span,
+        _: &'ast span::Span,
     ) {
         match external_declaration {
             ExternalDeclaration::FunctionDefinition(function_definition) => {
@@ -155,13 +153,14 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // Ignore any function definitions that the user did not specify to be checked.
+    // Function Definitions.
     fn visit_function_definition(
         &mut self,
         function_definition: &'ast FunctionDefinition,
-        span: &'ast span::Span,
+        _: &'ast span::Span,
     ) {
         if let DeclaratorKind::Identifier(id) = &function_definition.declarator.node.kind.node {
+            // Ignore any function definitions that the user did not specify to be checked.
             if self.functions_to_check.contains(&id.node.name) {
                 // Functions add the new scope early so it can include all their parameters.
                 self.function_body = true;
@@ -188,7 +187,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // // Parameters passed to a function are made live.
+    // Parameters passed to a function are declared in the function's scope.
     fn visit_parameter_declaration(
         &mut self,
         parameter_declaration: &'ast ParameterDeclaration,
@@ -199,7 +198,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // Function calls in checked funtions, like foo(x);
+    // Function calls, like foo(x);
     fn visit_call_expression(
         &mut self,
         call_expression: &'ast CallExpression,
@@ -217,6 +216,8 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         };
         let parameters_clone = function_parameters.clone();
         let mut argument_index = 0;
+
+        // Decide which action to take on each of the function's arguments.
         for argument in &call_expression.arguments {
             match &argument.node {
                 Expression::UnaryOperator(uo) => {
@@ -242,34 +243,42 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                     }
                 }
                 _ => {
-                    // If not a reference, try to set as not owner. Won't do anything if it isn't an owner type.
+                    // If not a reference, try to set as not owner. Won't do anything if it isn't an Owner type.
                     self.visit_expression(&argument.node, &argument.span);
-                    self.set_expression_is_valid(argument, false, span);
+                    self.set_expression_ownership(argument, false, span);
                 }
             }
             argument_index += 1;
         }
     }
 
-    // // =============================================== Small Expressions ===============================================
+    // Reset the previous member identifier so other functions know a new expression has started.
+    fn visit_expression(&mut self, expression: &'ast Expression, span: &'ast span::Span) {
+        self.member_identifier.clear();
+        visit::visit_expression(self, expression, span);
+    }
 
+    // Every identifier, like x
     fn visit_identifier(&mut self, identifier: &'ast Identifier, span: &'ast span::Span) {
         if self.member_count > 0 {
+            // A struct member is currently being compiled.
             self.member_identifier_pieces.push(identifier.name.clone());
             self.announce_no_ownership(self.member_identifier_pieces.join("."), span);
             self.announce_invalid_reference(self.member_identifier_pieces.join("."), span);
         } else {
+            // Non-struct member identifier.
             self.announce_no_ownership(identifier.name.clone(), span);
             self.announce_invalid_reference(identifier.name.clone(), span);
         }
     }
 
+    // Recursively visits all the nodes that make up a struct member identifer.
     fn visit_member_expression(
         &mut self,
         member_expression: &'ast MemberExpression,
         span: &'ast span::Span,
     ) {
-        // Compiling a member identifier (struct_name.x.y ..., if struct_name.x is dead, it's an error).
+        // Compiling a member identifier (struct_name.x.y ..., if struct_name.x lacks ownership, it's an error).
         // This is the recursive part.
         self.member_count += 1;
         self.visit_expression(
@@ -282,18 +291,19 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
             .push(member_expression.identifier.node.name.clone());
 
         if self.member_count > 0 || !self.mute_member_expression {
+            // These run every time, except possibly the last step if muted.
             let partial_name = self.member_identifier_pieces.join(".");
             self.announce_no_ownership(partial_name.clone(), span);
             self.announce_invalid_reference(partial_name, span);
         }
         if self.member_count == 0 {
+            // This is done once after the entire recurisve call chain.
             self.member_identifier = self.member_identifier_pieces.join(".");
             self.member_identifier_pieces.clear();
         }
     }
 
-    // =============================================== References ===============================================
-
+    // For indirection (dereferencing). Address operator & handled elsewhere.
     fn visit_unary_operator_expression(
         &mut self,
         uoe: &'ast UnaryOperatorExpression,
@@ -304,7 +314,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                 self.dereference_name.clear();
                 match &uoe.operand.node {
                     Expression::Identifier(id) => {
-                        // self.visit_identifier(&id.node, &id.span);
+                        self.announce_invalid_reference(id.node.name.to_string(), span);
                         let var = self.name_to_var(&id.node.name);
                         match &var.var_type {
                             VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
@@ -316,7 +326,9 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                     }
                     Expression::Member(member_expression) => {
                         let member_pieces_backup = self.member_identifier_pieces.clone();
+                        let member_count_backup = self.member_count;
                         self.get_member_expression_identifier(member_expression);
+                        self.announce_invalid_reference(self.member_identifier.clone(), span);
                         let var = self.name_to_var(&self.member_identifier.clone());
                         match &var.var_type {
                             VarType::ConstRef(points_to) | VarType::MutRef(points_to) => {
@@ -326,8 +338,9 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
                             _ => {}
                         }
                         self.member_identifier_pieces = member_pieces_backup;
+                        self.member_count = member_count_backup;
                     }
-                    _ => visit::visit_expression(self, &uoe.operand.node, &uoe.operand.span),
+                    _ => self.visit_expression(&uoe.operand.node, &uoe.operand.span),
                 }
             }
             _ => visit::visit_unary_operator_expression(self, uoe, span),
@@ -339,7 +352,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // =============================================== Control Flow ===============================================
+    // If statements - different from loop scopes because the if and else blocks have to be treated equally.
     fn visit_if_statement(&mut self, if_statement: &'ast IfStatement, _: &'ast span::Span) {
         self.visit_expression(&if_statement.condition.node, &if_statement.condition.span);
 
@@ -358,8 +371,7 @@ impl<'ast, 'a> visit::Visit<'ast> for BorrowChecker<'a> {
         }
     }
 
-    // =============================================== Debug ===============================================
-    // For printing the dead set each "line".
+    // For printing requested outputs on each line. Requires each line be a new block item, which requires {} around every block.
     fn visit_block_item(&mut self, block_item: &'ast BlockItem, span: &'ast span::Span) {
         match self.set_prints {
             PrintType::Ownership => self.print_ownership(span),

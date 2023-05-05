@@ -10,15 +10,11 @@ Rules:
 
 /*
 Ranting:
-    - I can't know every field of every struct in an arbitrary program, so it must be possible to kill a label the first time I see it, without it ever having been alive.
-    - Avoid unwrap() when possible
-    - x = x     with dead x reports the error, but re-lives x anyways.
     - C2Rust converter not very helpful because it uses 'unsafe' to avoid normal rust checks.
 */
 
 /*
 Limitations:
-    - No library imports in the input. The checker will try to analyze the whole library. This means it's unaware of library function signatures.
     - To get line-by-line prints, each block (if, for, while, ...) must have {}
     - No &&x, only &x are recognized as references because they are immeditately followed by an identifier.
     - Ellipses functions like printf(fnoojefo, ...); assume strictness (&x treated as mut, x treated as owner).
@@ -32,13 +28,7 @@ Limitations:
     - Function return types are ignored, so all the Rust functions are unless their return values are needed.
     - Rust places extra restrictions on globals, so I passed them in as function parameters instead.
     - Some unused struct fields that would require additional copy-pasting have been omitted. These have no effect on the output.
-*/
-
-/*
-TODO:
-    - Return error.
-    - No moving ownership out of references with dereferencing on RHS.
-    - Globals (scope 0) cannot move ownership and cannot have mutable references.
+    - Parser cannot parse <stdlib.h>, so tests with malloc and free are not possible.
 */
 
 #![feature(iter_intersperse)]
@@ -57,7 +47,7 @@ use lang_c::visit::*;
 use std::io::Write;
 
 fn main() {
-    let file_path = "/home/danrstebb/linux/kernel/events/callchain.c";
+    let file_path = "inputs\\ownership0.c";
     let config = Config::default();
     let result = parse(&config, file_path);
 
@@ -67,12 +57,13 @@ fn main() {
         vec!["main".to_string()],
         &parse.source,
         false,
-        PrintType::ErrorOnly,
+        PrintType::Ownership,
         PrintType::ErrorOnly,
     );
 
     // Running the checker.
     ownership_checker.visit_translation_unit(&parse.unit);
+    println!("\n\n"); // Spacing to make it easier to get images of the output.
 
     // Printing the abstract syntax tree to a file.
     let s = &mut String::new();

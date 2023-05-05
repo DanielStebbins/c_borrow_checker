@@ -9,6 +9,9 @@ type loff_t = __kernel_loff_t;
 
 struct ctl_table<'a> {
     data: &'a mut i32,
+    maxlen: i32,
+    extra1: &'a mut i32,
+    extra2: &'a mut i32,
 }
 
 struct atomic_t {
@@ -52,34 +55,22 @@ fn atomic_read(v: &mut atomic_t) -> i32 {
 fn mutex_unlock(lock: &mut mutex) {}
 
 // global variables
-static nr_callchain_events: atomic_t = atomic_t { counter: 0 };
-
-static mutex_owner: atomic_long_t = atomic_long_t { counter: 0 };
-static mutex_wait_lock: raw_spinlock_t = raw_spinlock_t {
-    raw_lock: { arch_spinlock_t { lock: 0 } },
-};
-static mutex_wait_list: list_head = list_head {
-    next: &mut mutex_wait_list,
-    prev: &mut mutex_wait_list,
-};
-static callchain_mutex: mutex = mutex {
-    owner: mutex_owner,
-    wait_lock: mutex_wait_lock,
-    wait_list: mutex_wait_list,
-};
+// Moved to function parameters to avoid Rust Static variable checks.
 
 // function to check, from callchain.c
 fn perf_event_max_stack_handler(
-    table: &mut ctl_table,
+    table: ctl_table,
     write: i32,
     buffer: &mut i32,
     lenp: &mut size_t,
     ppos: &mut loff_t,
+    mut nr_callchain_events: atomic_t,
+    mut callchain_mutex: mutex,
 ) -> i32 {
-    let mut value: &mut i32 = (*table).data;
+    let value: &mut i32 = table.data; // Borrow occurs here.
     let mut new_value: i32 = *value;
     let mut ret: i32;
-    let mut new_table: ctl_table = *table; // Cannout move out of *table behind mutable reference
+    let mut new_table: ctl_table = table; // Cannout move out of table because it is borrowed.
 
     new_table.data = &mut new_value;
     ret = proc_dointvec_minmax(&mut new_table, write, buffer, lenp, ppos);
@@ -91,7 +82,7 @@ fn perf_event_max_stack_handler(
     if atomic_read(&mut nr_callchain_events) != 0 {
         ret = -EBUSY;
     } else {
-        *value = new_value;
+        *value = new_value; // Value later used here.
     }
     mutex_unlock(&mut callchain_mutex);
 
