@@ -13,3 +13,5 @@ All test inputs can be found in /inputs.
   - /inputs/kernel0 and /inputs/kernel1 contain a mixture of C and Rust files showing different versions of the same Linux kernel functions.
 
 An example AST output can be found in ast.txt.
+
+See the full project report [here](Final Project Report.pdf).
