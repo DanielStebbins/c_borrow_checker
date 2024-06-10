@@ -14,4 +14,4 @@ All test inputs can be found in /inputs.
 
 An example AST output can be found in ast.txt.
 
-See the full project report [here]("Final Project Report.pdf").
+See the full project report [here](https://github.com/DanielStebbins/c_borrow_checker/blob/master/Final%20Project%20Report.pdf).
