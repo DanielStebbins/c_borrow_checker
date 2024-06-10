@@ -14,4 +14,4 @@ All test inputs can be found in /inputs.
 
 An example AST output can be found in ast.txt.
 
-See the full project report [here](Final Project Report.pdf).
+See the full project report (here)[Final Project Report.pdf].
